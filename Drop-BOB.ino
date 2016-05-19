@@ -6,7 +6,7 @@ Please reference my project blog: http://bobbobblogs.blogspot.ca/ if useing this
 
 When uploading to ESP8266 with Version 2.1 in Arduino boards use 80MHz and 115200 to prevent board crashes (known issue with servo)
 
-SUPERNOTE: IN ORDER TO PROGRAM, YOU NEED TO REMOUVE THE JUMPER.
+SUPERNOTE: IN ORDER TO PROGRAM, YOU NEED TO REMOUVE THE JUMPER. // Possibly // Not Not always required
 */
 //#include <VarSpeedServo.h> // for the servo - better library with ability to decide speed of servo and wait to complete
 #include <Servo.h>  // for the servo
@@ -307,7 +307,7 @@ void setup()
     
   }
   
-  Blynk.begin(auth, "ASUS-BOB-BOB-Jelly-Jube", "fuck off get your own");
+  Blynk.begin(auth, ssid, password);
   
   Serial.println("Dropcounter 0.1");
   Serial.println();
