@@ -242,7 +242,7 @@ void tune(){
       Serial.print("\t");
       Serial.print(set_DPM);Serial.print("\t");Serial.print("Setpoint");
       Serial.print("\t");
-      Serial.print(Servo_Val);Serial.print("\t");Serial.println("Servo_val");//*/
+      Serial.print(myservo.read());Serial.print("\t");Serial.println("Servo_val");//*/
 
       Blynk.virtualWrite(V10, DPM);
       Blynk.virtualWrite(V7, DPM_avg);
@@ -442,7 +442,7 @@ void loop(){
     Serial.print("\t");
     Serial.print(set_DPM);Serial.print("\t");Serial.print("Setpoint");
     Serial.print("\t");
-    Serial.print(Servo_Val);Serial.print("\t");Serial.print("Servo_val");//*
+    Serial.print(myservo.read());Serial.print("\t");Serial.print("Servo_val");//*
     Serial.print("\t");
     Serial.print(kp * error);Serial.print("\t");Serial.print("error");
     Serial.print("\t");
