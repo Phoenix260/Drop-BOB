@@ -8,7 +8,16 @@ When uploading to ESP8266 with Version 2.1 in Arduino boards use 80MHz and 11520
 
 SUPERNOTE: IN ORDER TO PROGRAM, YOU NEED TO REMOUVE THE JUMPER. // Possibly // Not Not always required
 */
-//#include <VarSpeedServo.h> // for the servo - better library with ability to decide speed of servo and wait to complete
+//******************For LCD****************definitions
+#define LCD_VIRTUAL               V13 // attach LCD to Virtual 13 complex mode
+#define BLYNK_PRINT Serial
+//******************For LCD****************
+
+// used for OTA wifi serial connection
+#include <ESP8266mDNS.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
+
 #include <Servo.h>  // for the servo
 #include <stdlib.h> // Include Standard Library
 #include <SimpleTimer.h>
@@ -24,6 +33,9 @@ const char* password = "fuck off get your own";
 const char auth[] = "58620a59ec64485aa3d5bfd00edae573"; //=====/\
 
 SimpleTimer timer;
+
+//LCD widget declaration
+WidgetLCD thLCD(LCD_VIRTUAL); // LCD widget, updated in blynkLoop
 
 //============================= \/ DEFINE PINS \/ ==============
 
@@ -69,7 +81,7 @@ const int sleepTimeS = 500;
 
 // SERVO SETUP VALUES ======================================================
 int set_DPM = 6;
-int Servo_Val = 90; // starting servo value (0 is full open 180 is full close)
+int Servo_Val = 145; // starting servo value (0 is full open 180 is full close)
 const int servo_min = 15;
 const int servo_max = 195;
 const int Servo_update_Speed = 500; // update every X milliseconds
@@ -251,6 +263,10 @@ void tune(){
       Blynk.virtualWrite(V5, millis() / 1000);
       Blynk.virtualWrite(V2, set_DPM);
 
+      thLCD.clear(); // Clear the LCD
+      thLCD.print(0, 0, "Tuning Mode"); // Print top line
+      thLCD.print(0, 1, "Please Wait"); // Print bottom line
+
       while (millis() - lastDrop < 100) {Blynk.run();/*debounce*/}
     }
     DPM_tune_avg = add / tuning_drops;
@@ -280,10 +296,10 @@ void setup()
   
   WiFi.begin(ssid, password);
   
-  /*while (WiFi.status() != WL_CONNECTED) {
+  while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
-  }*/ //don't wait until wifi connects ... in case someone needs to use it out of the box with no setup
+  }
 
   Serial.println("");
   Serial.println("WiFi connected");  
@@ -350,6 +366,30 @@ void loop(){
   if ((millis()-uptime) > 1000){
     uptime = millis();
     Blynk.virtualWrite(V5, millis()/1000);
+    String topLine = "Run DD-HH:MM:SS";
+    String botLine = "  ";
+    float seconds, minutes, hours, days;
+    // Calculate seconds, minutes, hours elapsed, based on millis
+    seconds = (float)millis() / 1000;
+    minutes = seconds / 60;
+    hours = minutes / 60;
+    days = hours / 24;
+    seconds = (int)seconds % 60;
+    minutes = (int)minutes % 60;
+    hours = (int)hours % 24;
+    // Construct a string indicating run time
+    if (days < 10) botLine += "0"; // Add the leading 0
+    botLine += String((int)days) + "-";
+    if (hours < 10) botLine += "0"; // Add the leading 0
+    botLine += String((int)hours) + ":";
+    if (minutes < 10) botLine += "0"; // Add the leading 0
+    botLine += String((int)minutes) + ":";
+    if (seconds < 10) botLine += "0"; // Add the leading 0
+    botLine += String((int)seconds);
+    
+    thLCD.clear(); // Clear the LCD
+    thLCD.print(0, 0, topLine.c_str()); // Print top line
+    thLCD.print(0, 1, botLine.c_str()); // Print bottom line
   }
  
   Blynk.run(); //Constant Blynk connection
@@ -498,7 +538,24 @@ void loop(){
     Serial.println();Serial.println("FINISHED!!!");
     //Blynk.tweet("Brew DONE!!: www.bobbobblogs.blogspot.com");
     myservo.detach();
-    while(restart == 0) {Blynk.run();} // when finished do nothing but listen for Blynk app
+    thLCD.clear(); // Clear the LCD
+    thLCD.print(0, 0, "Finished in:"); // Print top line
+    thLCD.print(0, 1, botLine.c_str()); // Print bottom line
+    while(restart == 0) 
+    {
+      Blynk.run();
+      pause_requests(); //accept pause requests
+
+      if (!digitalRead(SleepPin)){
+        myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
+        delay(15);
+        myservo.write(servo_max);
+        Serial.println("...Going to Sleep...");         
+        delay(1000);         
+        ESP.deepSleep(0, WAKE_RF_DEFAULT); // Sleep forever, until Pin#16 is un-grounded (button un-pushed)
+      }
+      
+    } // when finished do nothing but listen for Blynk app
     myservo.attach(ServoPIN);
     restart = 0;
     lastDrop = millis();
