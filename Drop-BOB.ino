@@ -13,24 +13,26 @@ SUPERNOTE: IN ORDER TO PROGRAM, YOU NEED TO REMOUVE THE JUMPER. // Possibly // N
 #define BLYNK_PRINT Serial
 //******************For LCD****************
 
-// used for OTA wifi serial connection
-#include <ESP8266mDNS.h>
-#include <WiFiUdp.h>
-#include <ArduinoOTA.h>
-
 #include <Servo.h>  // for the servo
 #include <stdlib.h> // Include Standard Library
 #include <SimpleTimer.h>
 #include <Wire.h>
 
 // for the ESP wifi - Blynk App =====\/
-//#define BLYNK_PRINT Serial    // Comment this out to disable prints and save space
 #include <SPI.h>
-#include <ESP8266WiFi.h> 
+
+// used for AP wifi connection
 #include <BlynkSimpleEsp8266.h> 
-const char* ssid     = "ASUS-BOB-BOB-Jelly-Jube";
-const char* password = "fuck off get your own";
-const char auth[] = "58620a59ec64485aa3d5bfd00edae573"; //=====/\
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
+#include <WiFiManager.h> //https://github.com/tzapu/WiFiManager
+
+char blynk_token[33]; //"Token to be entered in browser";
+
+String st;
+String rsid;
+String rpass;
+boolean newSSID = false;
 
 SimpleTimer timer;
 
@@ -565,22 +567,12 @@ void setup(){
   Serial.begin(9600);
   delay(10);
 
-  Serial.println();
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-  
-  WiFi.begin(ssid, password);
-  
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println("");
-  Serial.println("WiFi connected");  
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
+  WiFiManagerParameter custom_blynk_token("Blynk", "blynk token", blynk_token, 33);
+  WiFiManager wifiManager;
+  wifiManager.resetSettings(); //leave commented to save settings after connected
+  wifiManager.addParameter(&custom_blynk_token);
+  wifiManager.autoConnect("Drop-BOB");
+  Blynk.config(custom_blynk_token.getValue());
   
   while( abs(myservo.read() - Servo_Val) < Servo_movements + 1){
     
@@ -599,8 +591,6 @@ void setup(){
     
   }
   
-  Blynk.begin(auth, ssid, password);
-  //Blynk.syncAll();
   topLine = "MODE: Normal :) "; //startup in Normal mode. Show this on LCD
   
   Serial.println("Dropcounter 0.1");
@@ -645,6 +635,7 @@ void loop(){
 
   pause_requests(); //accept pause requests
   Blynk.run(); //Constant Blynk connection
+  yield();
   timer.run(); // Initiates SimpleTimer
   digitalWrite(LED_PIN, HIGH); // for some odd reason ... LED PIN to "HIGH" means "off"
 
