@@ -1,62 +1,99 @@
+/***********************************************************************************************
+ *  This sketch is created for use of a cold drip coffeemaker with a THING DEV from Sparkfun using the ESP8266 wifi chip.
+ *  Copyright: Bobby Lumia, may be used and modified for personal use only. No resale.
+ *  Please reference my project blog: http://bobbobblogs.blogspot.ca/ if using this sketch in your work.
+ *  When uploading to ESP8266 with Version 2.2 in Arduino boards use 80MHz and 115200 to prevent board crashes (known issue 
+ *  with servo on 160Mhz)
+ *  
+ *  NOTE: IN ORDER TO PROGRAM, YOU NEED TO REMOUVE THE JUMPER. // Possibly // Not Not always required ... actually never 
+ *  required. dunno why
+ *  
+ *  Resources: Blynk Arduino Library: https://github.com/blynkkk/blynk-library/releases/tag/v0.3.1
+ *  
+ *  Additional Boards Manager: http://arduino.esp8266.com/stable/package_esp8266com_index.json
+ *  Then install ESP8266 in Additional boards to select the Sparkfun ESP8266 Thing Dev 
+ *  
+ *  Development environment specifics:
+ *  Arduino IDE 1.6.9
+ *  SparkFun ESP8266 Thing Dev: https://www.sparkfun.com/products/13711
+************************************************************************************************/
 
+////////////////////////////////////
+// Blynk Virtual Variable Mapping //
+////////////////////////////////////
 
-/* This sketch is created for use of a cold drip coffeemaker with a THING DEV from Sparkfun using the ESP8266 wifi chip. 
-Copyright: Bobby Lumia, may be used and modified for personal use only. No resale.
-Please reference my project blog: http://bobbobblogs.blogspot.ca/ if useing this sketch in your work.
+#define SERVO_ANGLE_VIRTUAL_PIN V0
+#define SIM_DROP                V1
+#define SETPOINT_DPM_VIRT_PIN   V2
+#define DPM_SLIDER              V3
+#define DROP_COUNT_VIRTUAL_PIN  V4
+#define UPTIME_VIRTUAL_PIN      V5
+#define RESTART_BTN             V6
+#define DPM_avg_VIRTUAL_PIN     V7
+#define PAUSE_BTN               V8
+#define SERVO_SLIDER            V9
+#define DPM_VIRTUAL_PIN         V10
+#define RE_TUNE_BTN             V11
+//! V12 available
+#define LCD_VIRTUAL             V13 // attach LCD to Virtual 13 complex mode
+//! V14 available
+//! V15 available
+//! V16 available
+//! V17 available
+#define MODE_DROPDOWN           V18
+#define MENU_DROPDOWN           V19
+#define SERVO_UPDATE_SPEED_VPIN V20
 
-When uploading to ESP8266 with Version 2.1 in Arduino boards use 80MHz and 115200 to prevent board crashes (known issue with servo)
+/////////////////////////////////////////
+// Hardware Definitions                //
+// ESP8266 Thing Dev Board (WRL-13711) //
+/////////////////////////////////////////
 
-SUPERNOTE: IN ORDER TO PROGRAM, YOU NEED TO REMOUVE THE JUMPER. // Possibly // Not Not always required
-*/
-//******************For LCD****************definitions
-#define LCD_VIRTUAL               V13 // attach LCD to Virtual 13 complex mode
-#define BLYNK_PRINT Serial
-//******************For LCD****************
+#define ServoPIN                2    // (SDA) attaches the servo
+#define photo_interuptor_PIN    14   // (SCL/SCLK) attaches the photo-interuptor
+//! D7 available                     // (TX)
+//! D8 available                     // (RX)
+
+#define LED_PIN                 5    // (LED) attaches the LED (may be other pins on other boards
+//! D0 available                     // (Used in RESET)
+//! D4 available                     //
+//! D13 available                    // (MOSI)
+#define SleepPin                12   // (MISO) sleep pin. (grounding to sleep to keep consistent)
+#define WakePin                 16   // (XPD) wake pin. (grounding required to wake)
+//! A0 available                     // (ADC 10-bit 1V)
+//! D15 available                    //
+
+////////////////////////////////////
+// Included libraries............ //
+////////////////////////////////////
 
 #include <Servo.h>  // for the servo
 #include <stdlib.h> // Include Standard Library
-#include <SimpleTimer.h>
+#include <SimpleTimer.h> //https://github.com/jfturcot/SimpleTimer
 #include <Wire.h>
-
-// for the ESP wifi - Blynk App =====\/
 #include <SPI.h>
-
-// used for AP wifi connection
-#include <BlynkSimpleEsp8266.h> 
+#include <BlynkSimpleEsp8266.h>
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h> //https://github.com/tzapu/WiFiManager
 
+////////////////////////////////////
+// Variables .................... //
+////////////////////////////////////
+
 char blynk_token[33]; //"Token to be entered in browser";
-
-String st;
-String rsid;
-String rpass;
-boolean newSSID = false;
-
 SimpleTimer timer;
 
-//LCD widget declaration
 WidgetLCD thLCD(LCD_VIRTUAL); // LCD widget, updated in blynkLoop
 
-//============================= \/ DEFINE PINS \/ ==============
-
-const int ServoPIN = 2; // attaches the servo on pin 2 to the servo object ==================== PIN 2
-const int photo_interuptor_PIN = 14; // attaches the photo-interuptor to the 14 pin ============ PIN 14
-const int LED_PIN = 5; // attaches the LED to pin 5 (may be other pins on other boards ========== PIN 5
-const int WakePin = 16; // wake pin is ESP8266 pin 16. (grounding required to wake) =============PIN 16
-const int SleepPin = 12; // sleep pin is 12 (any pin would do). (grounding to sleep to keep consistent) =============PIN 12
-
 //================================\/ PID \/=============
-
 unsigned long lastTime = 0;
 double errSum = 0, lastErr = 0, error = 0, dErr = 0;
-double kp = 0.7, ki = 0.4/60000.0, kd = 0; //kp tunes to 1.3 alone
-
+double kp = 0.7, ki = 0.4 / 60000.0, kd = 0; //kp tunes to 1.3 alone
 //====================general variables==================================
 
-//VarSpeedServo myservo;  // create servo object to control a servo 
-Servo myservo;  // create servo object to control a servo 
+//VarSpeedServo myservo;  // create servo object to control a servo
+Servo myservo;  // create servo object to control a servo
 
 int raw = 1024; //sensor reads High (1024) when no drop
 volatile long count = 0;
@@ -135,133 +172,135 @@ float DPM_tune_avg = 0;
 
 //=========================================================================BLYNK functions & Widgets=====
 
-void pause_requests(){
-  while(pause == 1){
-     Blynk.run(); 
-     thLCD.clear(); // Clear the LCD
-     thLCD.print(0, 0, "Paused ..."); // Print top line
-     thLCD.print(0, 1, "Valve Closed"); // Print bottom line
-     
-     if (!digitalRead(SleepPin)){
-        myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-        delay(15);
-        myservo.write(servo_max);
-        Serial.println("...Going to Sleep...");
-        thLCD.clear(); // Clear the LCD
-        thLCD.print(0, 0, "Going to Sleep"); // Print top line
-        thLCD.print(0, 1, "zzzzzzzzzzzzzZ"); // Print bottom line
-        delay(1000);
-        ESP.deepSleep(0, WAKE_RF_DEFAULT); // Sleep forever, until Pin#16 is un-grounded (button un-pushed)
-     }
-     
-     int lapse = millis() - slide_time;
+void pause_requests() {
+  while (pause == 1) {
+    Blynk.run();
+    thLCD.clear(); // Clear the LCD
+    thLCD.print(0, 0, "Paused ..."); // Print top line
+    thLCD.print(0, 1, "Valve Closed"); // Print bottom line
 
-     if (slide_time == 0){                  // If the pause comes from the app, close the servo to prevent drops (true pause)
-        myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-        delay(15);
-        myservo.write(servo_max);
-        Blynk.virtualWrite(V0, servo_max);
-     }
-     
-     if (lapse > 1000 && slide_time > 0){   // if the pause comes from a parameter change
-        pause = 0;
-        slide_time = 0;
-        myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-        delay(15);
-        myservo.write(Servo_Val);
-        Blynk.virtualWrite(V0, Servo_Val);
-        Blynk.virtualWrite(V2, set_DPM);
-     }
-     
-     if (pause == 0) {                       // exit clause to put the valve back after pausing
-        myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-        delay(15);
-        myservo.write(Servo_Val);
-        Blynk.virtualWrite(V0, myservo.read());
-     }
+    if (!digitalRead(SleepPin)) {
+      myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
+      delay(15);
+      myservo.write(servo_max);
+      Serial.println("...Going to Sleep...");
+      thLCD.clear(); // Clear the LCD
+      thLCD.print(0, 0, "Going to Sleep"); // Print top line
+      thLCD.print(0, 1, "zzzzzzzzzzzzzZ"); // Print bottom line
+      delay(1000);
+      ESP.deepSleep(0, WAKE_RF_DEFAULT); // Sleep forever, until Pin#16 is un-grounded (button un-pushed)
+    }
+
+    int lapse = millis() - slide_time;
+
+    if (slide_time == 0) {                 // If the pause comes from the app, close the servo to prevent drops (true pause)
+      myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
+      delay(15);
+      myservo.write(servo_max);
+      Blynk.virtualWrite(V0, servo_max);
+    }
+
+    if (lapse > 1000 && slide_time > 0) {  // if the pause comes from a parameter change
+      pause = 0;
+      slide_time = 0;
+      myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
+      delay(15);
+      myservo.write(Servo_Val);
+      Blynk.virtualWrite(V0, Servo_Val);
+      Blynk.virtualWrite(V2, set_DPM);
+    }
+
+    if (pause == 0) {                       // exit clause to put the valve back after pausing
+      myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
+      delay(15);
+      myservo.write(Servo_Val);
+      Blynk.virtualWrite(V0, myservo.read());
+    }
   }
 }
 
-BLYNK_WRITE(V1){ //V1 pushbutton in Blynk app that simulates a drop of water (for testing) - INPUT
-  if (param.asInt() == 1){
+BLYNK_WRITE(SIM_DROP) { //pushbutton in Blynk app that simulates a drop of water (for testing) - INPUT
+  if (param.asInt() == 1) {
     voltage = 0;
     button = 1;
   }
 }
 
-BLYNK_WRITE(V3){ //V3 is "Blynk slider for DPM setting" - INPUT
+BLYNK_WRITE(DPM_SLIDER) { //"Blynk slider for DPM setting" - INPUT
   pause = 1;
   slide_time = millis();
   set_DPM = param[0].asInt();
 }
 
-BLYNK_WRITE(V6){ //V6 is "Blynk restart button" - INPUT
+BLYNK_WRITE(RESTART_BTN) { //is "Blynk restart button" - INPUT
   restart = param.asInt();
 }
 
-BLYNK_WRITE(V8){ //V8 is "Blynk Pause button" - INPUT
+BLYNK_WRITE(PAUSE_BTN) { //is "Blynk Pause button" - INPUT
   pause = param.asInt();
 }
 
-BLYNK_WRITE(V9){ //V9 is "Blynk Manual servo control" - INPUT
+BLYNK_WRITE(SERVO_SLIDER) { //is "Blynk Manual servo control" - INPUT
   pause = 1;
   slide_time = millis();
   Servo_Val = param.asInt();
 }
 
-void open_up(){
-  if ((millis()-lastDrop) > open_delay*(60000.0/set_DPM) && Mode != 3){ 
+void open_up() {
+  if ((millis() - lastDrop) > open_delay * (60000.0 / set_DPM) && Mode != 3) {
     uint32_t temp_delta = millis() - lastDrop;
-    float temp_DPM = 60000.0/temp_delta;
+    float temp_DPM = 60000.0 / temp_delta;
 
-    Servo_Val = Servo_Val - open_factor*(set_DPM - temp_DPM); // if the servo closed and no drops are comming for too long open it up a little.
-    
-    if (Servo_Val < servo_min){Servo_Val = servo_min;}
+    Servo_Val = Servo_Val - open_factor * (set_DPM - temp_DPM); // if the servo closed and no drops are comming for too long open it up a little.
+
+    if (Servo_Val < servo_min) {
+      Servo_Val = servo_min;
+    }
 
     myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-    delay(15);  
+    delay(15);
     myservo.write(Servo_Val);
     //Serial.print("open_up() - Servo value:");Serial.println(Servo_Val);
     Blynk.virtualWrite(V0, myservo.read());
   }
 }
 
-void tune(){
-  for(Servo_Val - 5; Servo_Val < servo_max; Servo_Val++){
+void tune() {
+  for (/*nothing needed here*/; Servo_Val < servo_max; Servo_Val++) {
     myservo.attach(ServoPIN);
     myservo.write(Servo_Val);
-    Blynk.virtualWrite(V0, Servo_Val);
+    Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, Servo_Val);
     add = 0;
-    
-    for(int run_tune = 0; run_tune < tuning_drops; run_tune++){
-      
-      while(voltage == 5.0){
+
+    for (int run_tune = 0; run_tune < tuning_drops; run_tune++) {
+
+      while (voltage == 5.0) {
         Blynk.run();
-        
-        if (!digitalRead(SleepPin)){
+
+        if (!digitalRead(SleepPin)) {
           myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
           delay(15);
           myservo.write(servo_max);
-          Serial.println("...Going to Sleep...");         
-          delay(1000);         
+          Serial.println("...Going to Sleep...");
+          delay(1000);
           ESP.deepSleep(0, WAKE_RF_DEFAULT); // Sleep forever, until Pin#16 is un-grounded (button un-pushed)
         }
-     
+
         timer.run();
         pause_requests();
-        
-        if (millis() - High_LED > 500){ // add LED indicator for tuning
-          digitalWrite(LED_PIN, LOW);  
+
+        if (millis() - High_LED > 500) { // add LED indicator for tuning
+          digitalWrite(LED_PIN, LOW);
           Low_LED = millis();
           High_LED = INFINITY;
         }
-        if (millis() - Low_LED > 500){  // add LED indicator for tuning
-          digitalWrite(LED_PIN, HIGH); 
+        if (millis() - Low_LED > 500) { // add LED indicator for tuning
+          digitalWrite(LED_PIN, HIGH);
           High_LED = millis();
           Low_LED = INFINITY;
         }
       }
-      
+
       voltage = 5;
       delta = millis() - lastDrop; //get the difference in time between each drop
       lastDrop = millis(); // remember time of last drop to prevent bouncing.
@@ -271,23 +310,23 @@ void tune(){
 
       add = add + DPM;
       DPM_avg = add / (run_tune + 1);
-      
-      Serial.print(delta);Serial.print("\t");Serial.print("ms");
+
+      Serial.print(delta); Serial.print("\t"); Serial.print("ms");
       Serial.print("\t");
       Serial.print(count);
       Serial.print("\t");
-      Serial.print(DPM);Serial.print("\t");Serial.print("DPM");
+      Serial.print(DPM); Serial.print("\t"); Serial.print("DPM");
       Serial.print("\t");
-      Serial.print(set_DPM);Serial.print("\t");Serial.print("Setpoint");
+      Serial.print(set_DPM); Serial.print("\t"); Serial.print("Setpoint");
       Serial.print("\t");
-      Serial.print(myservo.read());Serial.print("\t");Serial.println("Servo_val");//*/
+      Serial.print(myservo.read()); Serial.print("\t"); Serial.println("Servo_val"); //*/
 
-      Blynk.virtualWrite(V10, DPM);
-      Blynk.virtualWrite(V7, DPM_avg);
-      Blynk.virtualWrite(V4, count);
-      Blynk.virtualWrite(V0, myservo.read());
-      Blynk.virtualWrite(V5, millis() / 1000);
-      Blynk.virtualWrite(V2, set_DPM);
+      Blynk.virtualWrite(DPM_VIRTUAL_PIN, DPM);
+      Blynk.virtualWrite(DPM_avg_VIRTUAL_PIN, DPM_avg);
+      Blynk.virtualWrite(DROP_COUNT_VIRTUAL_PIN, count);
+      Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
+      Blynk.virtualWrite(UPTIME_VIRTUAL_PIN, millis() / 1000);
+      Blynk.virtualWrite(SETPOINT_DPM_VIRT_PIN, set_DPM);
 
       thLCD.clear(); // Clear the LCD
       thLCD.print(0, 0, "Tuning Mode"); // Print top line
@@ -296,28 +335,31 @@ void tune(){
       //while (millis() - lastDrop < 100) {Blynk.run();/*debounce*/}
     }
     DPM_tune_avg = add / tuning_drops;
-    
+
     if (DPM_tune_avg < set_DPM) {
-      closed_to_stop = Servo_Val + 10; 
-      open_to_drop = Servo_Val - 10; 
+      closed_to_stop = Servo_Val + 10;
+      open_to_drop = Servo_Val - 10;
       if (Servo_Val < servo_min) Servo_Val = servo_min;
       if (Servo_Val > servo_max) Servo_Val = servo_max;
       break;
-     }
-    if (restart == 1) {restart = 0; break;}
+    }
+    if (restart == 1) {
+      restart = 0;
+      break;
+    }
   }
 }
 
-BLYNK_WRITE(V11){ //V11 pushbutton in Blynk app for calling up the tune function below - INPUT
-  if (param.asInt() == 1){
+BLYNK_WRITE(RE_TUNE_BTN) { //pushbutton in Blynk app for calling up the tune function below - INPUT
+  if (param.asInt() == 1) {
     tune();
   }
 }
 
-BLYNK_WRITE(V18){ //V16 Dropdown selection of MODE - INPUT
-  if (param.asInt() == 1){
+BLYNK_WRITE(MODE_DROPDOWN) { //Dropdown selection of MODE - INPUT
+  if (param.asInt() == 1) {
     Mode = 1; //Normal mode flag
-    kp = 0.7, ki = 0.4/60000.0, kd = 0; //std PI(D)
+    kp = 0.7, ki = 0.4 / 60000.0, kd = 0; //std PI(D)
     servo_min = 15; servo_max = 195; //std constraints
     Servo_update_Speed = 500; //std movement
     open_factor = 0.5; //std open factor
@@ -329,9 +371,9 @@ BLYNK_WRITE(V18){ //V16 Dropdown selection of MODE - INPUT
     topLine = "MODE: Normal :) ";
     Servo_movements = 1;      // how much to update servo position by
   }
-    if (param.asInt() == 2){
+  if (param.asInt() == 2) {
     Mode = 2; //Agressive mode flag
-    kp = 0.6, ki = 0.3/60000.0, kd = 700; //derivative term predicts output bu more jitter
+    kp = 0.6, ki = 0.3 / 60000.0, kd = 700; //derivative term predicts output bu more jitter
     //servo_min = 120; servo_max = 180; //tighter constraints
     Servo_update_Speed = 1000; //reduce the movement speed (mostly when opening up)
     open_factor = 0.25; //let the system equalize longer by halfing the opening up factor.
@@ -343,7 +385,7 @@ BLYNK_WRITE(V18){ //V16 Dropdown selection of MODE - INPUT
     topLine = "MODE: AGRESSIVE!";
     Servo_movements = 1;      // how much to update servo position by
   }
-    if (param.asInt() == 3){
+  if (param.asInt() == 3) {
     Mode = 3; //Forced mode flag
     //open_to_drop = 150; // servo value --- Let tune decide this one
     //closed_to_stop = 180; //servo value --- Let tune decide this one
@@ -356,62 +398,67 @@ BLYNK_WRITE(V18){ //V16 Dropdown selection of MODE - INPUT
   }
 }
 
-BLYNK_WRITE(V19){ //V19 Menue dropdown
-  if (param.asInt() == 1){
+BLYNK_WRITE(MENU_DROPDOWN) { //Menu dropdown
+  if (param.asInt() == 1) {
     restart = 1;
   }
-  if (param.asInt() == 2){
+  if (param.asInt() == 2) {
     pause = 1;
     delay(15);
     pause_requests();
   }
-  if (param.asInt() == 3){
+  if (param.asInt() == 3) {
     thLCD.clear(); // Clear the LCD
     thLCD.print(0, 0, "Tuning Mode"); // Print top line
     thLCD.print(0, 1, "Please Wait"); // Print bottom line
     tune();
   }
-  if (param.asInt() == 4){
+  if (param.asInt() == 4) {
     voltage = 0;
   }
-  
+
 }
 
-void print_stats(){
-    Serial.print(delta);Serial.print("\t");Serial.print("ms");
+void print_stats() {
+  Serial.print(delta); Serial.print("\t"); Serial.print("ms");
+  Serial.print("\t");
+  Serial.print(count);
+  Serial.print("\t");
+  Serial.print(DPM_avg); Serial.print("\t"); Serial.print("DPM");
+  Serial.print("\t");
+  Serial.print(set_DPM); Serial.print("\t"); Serial.print("Setpoint");
+  Serial.print("\t");
+  if ( (Mode == 1) | (Mode == 2) ) {
+    Serial.print(myservo.read());
     Serial.print("\t");
-    Serial.print(count);
+    Serial.print("Servo_val");
+  }
+  if (Mode == 3) {
+    Serial.print(Servo_update_Speed);
     Serial.print("\t");
-    Serial.print(DPM_avg);Serial.print("\t");Serial.print("DPM");
-    Serial.print("\t");
-    Serial.print(set_DPM);Serial.print("\t");Serial.print("Setpoint");
-    Serial.print("\t");
-    if (Mode == 1 | Mode == 2) {Serial.print(myservo.read()); Serial.print("\t"); Serial.print("Servo_val");}
-    if (Mode == 3) {Serial.print(Servo_update_Speed); Serial.print("\t"); Serial.print("Servo_update_Speed");}
-    Serial.print("\t");
-    Serial.print(kp * error);Serial.print("\t");Serial.print("error");
-    Serial.print("\t");
-    Serial.print(ki * errSum);Serial.print("\t");Serial.print("errSum");
-    Serial.print("\t");
-    Serial.print(kd * dErr);Serial.print("\t");Serial.println("dErr");//*/
+    Serial.print("Servo_update_Speed");
+  }
+  Serial.print("\t");
+  Serial.print(kp * error); Serial.print("\t"); Serial.print("error");
+  Serial.print("\t");
+  Serial.print(ki * errSum); Serial.print("\t"); Serial.print("errSum");
+  Serial.print("\t");
+  Serial.print(kd * dErr); Serial.print("\t"); Serial.println("dErr"); //*/
 
-    Blynk.virtualWrite(V10, DPM);
-    Blynk.virtualWrite(V7, DPM_avg);
-    Blynk.virtualWrite(V4, count);
-    Blynk.virtualWrite(V0, myservo.read());
-    Blynk.virtualWrite(V2, set_DPM);
-    Blynk.virtualWrite(V20, Servo_update_Speed);
-    
-    //Blynk.syncVirtual(V18); //sync Mode from last setting on APP
-    //Blynk.syncVirtual(V3); //sync setDPM from last setting on APP
+  Blynk.virtualWrite(DPM_VIRTUAL_PIN, DPM);
+  Blynk.virtualWrite(DPM_avg_VIRTUAL_PIN, DPM_avg);
+  Blynk.virtualWrite(DROP_COUNT_VIRTUAL_PIN, count);
+  Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
+  Blynk.virtualWrite(SETPOINT_DPM_VIRT_PIN, set_DPM);
+  Blynk.virtualWrite(SERVO_UPDATE_SPEED_VPIN, Servo_update_Speed);
 }
 
-void measure_DPM(){
+void measure_DPM() {
   state = LOW;
   button = 0;
 
   digitalWrite(LED_PIN, LOW); // for some odd reason ... LED PIN to "LOW" means "on"
-  
+
   delta = millis() - lastDrop; //get the difference in time between each drop
   lastDrop = millis(); // remember time of last drop to prevent bouncing.
   numDrops = count - lastDropCount;
@@ -419,94 +466,96 @@ void measure_DPM(){
   DPM = 60000.0 / (delta / numDrops); // get drop per min
 
   //====================================================================== 3 reading smoothing
-  total = total - readings[index_n];  // subtract the last reading:       
-  readings[index_n] = DPM; 
-  total = total + readings[index_n];   // add the reading to the total:    
-  index_n = index_n + 1;                    
-  
-  if (index_n >= numReadings) {  
-    start_avg = 1;      
-    index_n = 0;}      
+  total = total - readings[index_n];  // subtract the last reading:
+  readings[index_n] = DPM;
+  total = total + readings[index_n];   // add the reading to the total:
+  index_n = index_n + 1;
+
+  if (index_n >= numReadings) {
+    start_avg = 1;
+    index_n = 0;
+  }
   if (start_avg == 1) {
-    DPM = total / numReadings;}   // drop the instantaneou DPM and use the running ave after all initial readings taken
+    DPM = total / numReadings;
+  }   // drop the instantaneou DPM and use the running ave after all initial readings taken
 
   //======================================================================== 10 reading average
-  total_avg = total_avg - readings_avg[index_n_avg];  // subtract the last reading:       
-  readings_avg[index_n_avg] = DPM; 
-  total_avg = total_avg + readings_avg[index_n_avg];   // add the reading to the total:    
-  index_n_avg = index_n_avg + 1;                    
-  
-  if (index_n_avg >= numReadings_avg) {  
-    start_avg_avg = 1;      
+  total_avg = total_avg - readings_avg[index_n_avg];  // subtract the last reading:
+  readings_avg[index_n_avg] = DPM;
+  total_avg = total_avg + readings_avg[index_n_avg];   // add the reading to the total:
+  index_n_avg = index_n_avg + 1;
+
+  if (index_n_avg >= numReadings_avg) {
+    start_avg_avg = 1;
     index_n_avg = 0;
-  }      
-  
+  }
+
   if (start_avg_avg == 1) {
     DPM_avg = total_avg / numReadings_avg;
   }   // drop the instantaneou DPM and use the running ave after all initial readings taken
 }
 
-void Servo_angle_method(){ //(NORMAL & AGRESSIVE MODE) The servo angle is adjusted after every drop to maintain set_DPM
+void Servo_angle_method() { //(NORMAL & AGRESSIVE MODE) The servo angle is adjusted after every drop to maintain set_DPM
   // This method sets the servo position according to the latest drop DPM (more open or more closed
   // This method is very lagging as it uses old data, including the last 10 point average to set the future servo position
 
-     if (voltage == 0 && state == HIGH) {
-       state = LOW;
-       measure_DPM();
-       voltage = 5.0;
-      
-      /*Compute all the working error variables*/
-      error = set_DPM - DPM;
-      errSum += (error * delta);
-      dErr = (error - lastErr) / delta;    
-     
-      if ( DPM_avg - set_DPM > DPM_buffer && first_drop == 0) { //to add forward or reverse bias Uncomment the elseif loop and the DPM condition
-        Servo_Val = Servo_Val - ( kp * error + ki * errSum + kd * dErr); // Set servo change depending on how far away from set_DPM you are at
-        if (Servo_Val < servo_min) Servo_Val = servo_min;
-        if (Servo_Val > servo_max) Servo_Val = servo_max;
-  
-        if ( kick > 0){
-          myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-          delay(15);  
-          myservo.write(myservo.read() - kick);
-          delay(kick_delay);
-          myservo.write(Servo_Val);
-        }
-             
-      }
-      else if ( DPM_avg - set_DPM < DPM_buffer && first_drop == 0) { // This is to give a Forward or Reverse BIAS (commented out)
-        Servo_Val = Servo_Val - open_bias * (kp * error + ki * errSum + kd * dErr); // Set servo change depending on how far away from set_DPM you are at
-        if (Servo_Val < servo_min) Servo_Val = servo_min;
-        if (Servo_Val > servo_max) Servo_Val = servo_max;
-  
-        if ( kick > 0){
-          myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-          delay(15);  
-          myservo.write(myservo.read() + kick);
-          delay(kick_delay);
-          myservo.write(Servo_Val);
-        }
-        
-      }
-  
-      print_stats();   
-      first_drop = 0;
+  if (voltage == 0 && state == HIGH) {
+    state = LOW;
+    measure_DPM();
+    voltage = 5.0;
 
-     }
-     
-    if (voltage == 0 && state == LOW ){  // end of pulse, now we may expect a new one, DEBOUNCE
-      if (millis() - lastDrop > 50) state = HIGH; // only go back to state high if some time has passed.
+    /*Compute all the working error variables*/
+    error = set_DPM - DPM;
+    errSum += (error * delta);
+    dErr = (error - lastErr) / delta;
+
+    if ( DPM_avg - set_DPM > DPM_buffer && first_drop == 0) { //to add forward or reverse bias Uncomment the elseif loop and the DPM condition
+      Servo_Val = Servo_Val - ( kp * error + ki * errSum + kd * dErr); // Set servo change depending on how far away from set_DPM you are at
+      if (Servo_Val < servo_min) Servo_Val = servo_min;
+      if (Servo_Val > servo_max) Servo_Val = servo_max;
+
+      if ( kick > 0) {
+        myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
+        delay(15);
+        myservo.write(myservo.read() - kick);
+        delay(kick_delay);
+        myservo.write(Servo_Val);
+      }
+
     }
-  
-    lastErr = error;
+    else if ( DPM_avg - set_DPM < DPM_buffer && first_drop == 0) { // This is to give a Forward or Reverse BIAS (commented out)
+      Servo_Val = Servo_Val - open_bias * (kp * error + ki * errSum + kd * dErr); // Set servo change depending on how far away from set_DPM you are at
+      if (Servo_Val < servo_min) Servo_Val = servo_min;
+      if (Servo_Val > servo_max) Servo_Val = servo_max;
+
+      if ( kick > 0) {
+        myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
+        delay(15);
+        myservo.write(myservo.read() + kick);
+        delay(kick_delay);
+        myservo.write(Servo_Val);
+      }
+
+    }
+
+    print_stats();
+    first_drop = 0;
+
+  }
+
+  if (voltage == 0 && state == LOW ) { // end of pulse, now we may expect a new one, DEBOUNCE
+    if (millis() - lastDrop > 50) state = HIGH; // only go back to state high if some time has passed.
+  }
+
+  lastErr = error;
 }
 
-void Speed_to_open_method(){ //(FORCED MODE) The speed at which the servo is opened to let out a drop is adjusted after every drop to maintain set_DPM
+void Speed_to_open_method() { //(FORCED MODE) The speed at which the servo is opened to let out a drop is adjusted after every drop to maintain set_DPM
   //The difference with this method is that it always opens the servo. So there is no possibility to "stall" like the Servo angle method
   //which waits for a drop then potentially sets the angle to a "bad" angle and can wait indefinitely, until the openup kicks in
   //this should be more acurate but also cause more servo noise and it will constantly be running and possibly closing quickly
   //after each drop (TBD)
-  
+
   if (voltage == 0) { //Drop
     voltage = 5;
     measure_DPM();
@@ -516,8 +565,8 @@ void Speed_to_open_method(){ //(FORCED MODE) The speed at which the servo is ope
     if (Servo_Val > servo_max) Servo_Val = servo_max;
 
     //Serial.print("Servo val: ");Serial.println(Servo_Val);
-    
-    while(myservo.read() < servo_max - close_increment && voltage == 5){
+
+    while (myservo.read() < servo_max - close_increment && voltage == 5) {
       myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
       delay(5);
       if (myservo.read() + close_increment > servo_max) close_increment = 0;
@@ -526,29 +575,29 @@ void Speed_to_open_method(){ //(FORCED MODE) The speed at which the servo is ope
       //Serial.print("1:closing valve: ");Serial.println(myservo.read());
     }
     close_increment = 3;
-    
+
     /*Compute all the working error variables*/
     error = set_DPM - DPM;
     errSum += (error * delta);
-    dErr = (error - lastErr) / delta;    
-    
+    dErr = (error - lastErr) / delta;
+
     if (abs(DPM_avg - set_DPM) > DPM_buffer && first_drop == 0) { //to add forward or reverse bias Uncomment the elseif loop and the DPM condition
-      Servo_update_Speed -= 10*( kp * error + ki * errSum + kd * dErr); // Set servo change depending on how far away from set_DPM you are at
+      Servo_update_Speed -= 10 * ( kp * error + ki * errSum + kd * dErr); // Set servo change depending on how far away from set_DPM you are at
     }
-    
-    print_stats(); 
+
+    print_stats();
     first_drop = 0;
   }
-  
-  if (voltage == 5 && state == LOW ){  // end of pulse, now we may expect a new one, DEBOUNCE
+
+  if (voltage == 5 && state == LOW ) { // end of pulse, now we may expect a new one, DEBOUNCE
     if (millis() - lastDrop > 50) state = HIGH; // only go back to state high if some time has passed.
   }
 
-  if(millis() - lastDrop > time_to_stay_closed && myservo.read() > open_to_drop + open_increment && voltage == 5){
+  if (millis() - lastDrop > time_to_stay_closed && myservo.read() > open_to_drop + open_increment && voltage == 5) {
     Servo_Val = open_to_drop;
   }
-  
-  if(myservo.read() == Servo_Val){ //has reached open, but still no drop
+
+  if (myservo.read() == Servo_Val) { //has reached open, but still no drop
     Servo_Val -= 1;
   }
 }
@@ -561,9 +610,9 @@ BLYNK_CONNECTED() {
     Blynk.syncVirtual(V3); //sync setDPM from last setting on APP
     isFirstConnect = false;
   }
-} 
+}
 
-void setup(){    
+void setup() {
   Serial.begin(9600);
   delay(10);
 
@@ -573,32 +622,32 @@ void setup(){
   wifiManager.addParameter(&custom_blynk_token);
   wifiManager.autoConnect("Drop-BOB");
   Blynk.config(custom_blynk_token.getValue());
-  
-  while( abs(myservo.read() - Servo_Val) < Servo_movements + 1){
-    
-    if(myservo.read() > Servo_Val ){
+
+  while ( abs(myservo.read() - Servo_Val) < Servo_movements + 1) {
+
+    if (myservo.read() > Servo_Val ) {
       myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
       delay(15);
       myservo.write(myservo.read() - Servo_movements);
     }
-    else if(myservo.read() < Servo_Val){
+    else if (myservo.read() < Servo_Val) {
       myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
       delay(15);
       myservo.write(myservo.read() + Servo_movements);
     }
 
     delay(50);
-    
+
   }
-  
+
   topLine = "MODE: Normal :) "; //startup in Normal mode. Show this on LCD
-  
+
   Serial.println("Dropcounter 0.1");
   Serial.println();
-  
+
   for (int thisReading = 0; thisReading < numReadings; thisReading++)
     readings[thisReading] = 0; // Initialize the array
-    
+
   pinMode(photo_interuptor_PIN, INPUT);
   attachInterrupt(digitalPinToInterrupt(photo_interuptor_PIN), drop, FALLING); //possibly also Mode LOW instead of FALLING
   pinMode(ServoPIN, OUTPUT);
@@ -615,23 +664,23 @@ void setup(){
   delay(500);
   digitalWrite(LED_PIN, HIGH); led_gp5 = HIGH;
   delay(500);
-  
+
   Blynk.virtualWrite(V4, count);
   Blynk.virtualWrite(V7, DPM);
   Blynk.virtualWrite(V2, set_DPM);
   Blynk.virtualWrite(V0, myservo.read());
 
   //Blynk.tweet("Brewing a fresh pot of Cold Drip Coffee with my Drop-BOB v1.0: Check it out at www.bobbobblogs.blogspot.com");
-  
+
   timer.setInterval(10000L, open_up); // open up the servo every 5 seconds if no drops come ... not a Blynk update
-    
+
   Blynk.syncVirtual(V18); //sync Mode from last setting on APP
   Blynk.syncVirtual(V3); //sync setDPM from last setting on APP
-    
+
   tune(); //start by tuning the system
 }//================================================================================END SETUP========================
 
-void loop(){
+void loop() {
 
   pause_requests(); //accept pause requests
   Blynk.run(); //Constant Blynk connection
@@ -639,9 +688,9 @@ void loop(){
   timer.run(); // Initiates SimpleTimer
   digitalWrite(LED_PIN, HIGH); // for some odd reason ... LED PIN to "HIGH" means "off"
 
-  if ((millis()-uptime) > 1000){ //update uptime LCD & variable V5
+  if ((millis() - uptime) > 1000) { //update uptime LCD & variable V5
     uptime = millis();
-    Blynk.virtualWrite(V5, millis()/1000);
+    Blynk.virtualWrite(V5, millis() / 1000);
     // Calculate seconds, minutes, hours elapsed, based on millis
     botLine = "";
     float seconds, minutes, hours, days;
@@ -661,49 +710,49 @@ void loop(){
     botLine += String((int)minutes) + ":";
     if (seconds < 10) botLine += "0"; // Add the leading 0
     botLine += String((int)seconds);
-    
+
     thLCD.clear(); // Clear the LCD
     thLCD.print(0, 0, topLine); // Print top line
     thLCD.print(0, 1, botLine); // Print bottom line
   }
 
-  if (!digitalRead(SleepPin)){ //Monitor sleep/wake switch
+  if (!digitalRead(SleepPin)) { //Monitor sleep/wake switch
     myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
     delay(15);
     myservo.write(servo_max);
-    Serial.println("...Going to Sleep...");         
-    delay(1000);         
+    Serial.println("...Going to Sleep...");
+    delay(1000);
     ESP.deepSleep(0, WAKE_RF_DEFAULT); // Sleep forever, until Pin#16 is un-grounded (button un-pushed)
   }
-  
+
   //int raw = analogRead(photo_interuptor_PIN); // read the drop sensor
-  
+
   /*if(button == 0){ //Sim drop button on Blynk makes this button var = 1 ... so it skips this and manually trips the voltage
     voltage = 5.0 * raw / 1023; // convert it to voltage
-  }*/
+    }*/
 
-  if (Mode == 1 | Mode == 2){ //Only if Mode = Normal (1) or Agressive (2) do this
+  if ( (Mode == 1) | (Mode == 2) ) { //Only if Mode = Normal (1) or Agressive (2) do this
     Servo_angle_method();
   }
 
-  if (Mode == 3){ //Only if Mode = Forced (3) do this
+  if (Mode == 3) { //Only if Mode = Forced (3) do this
     Speed_to_open_method();
   }
 
-  if( (millis() - Servo_adjust) > Servo_update_Speed){
+  if ( (millis() - Servo_adjust) > Servo_update_Speed) {
     Servo_adjust = millis();
 
     //Serial.print(myservo.read()); Serial.print(" "); Serial.print(Servo_movements); Serial.print(" "); Serial.println(Servo_Val);
 
-    if(myservo.read() < Servo_Val){
+    if (myservo.read() < Servo_Val) {
       myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
       delay(15);
       myservo.write(myservo.read() + Servo_movements);
       Blynk.virtualWrite(V0, myservo.read());
       //Serial.print("Smooth-closing valve: ");Serial.println(myservo.read());
     }
-    
-    if(myservo.read() > Servo_Val){
+
+    if (myservo.read() > Servo_Val) {
       myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
       delay(15);
       myservo.write(myservo.read() - Servo_movements);
@@ -714,40 +763,40 @@ void loop(){
   }
 
   //=============if open to the max for 6 min and nothing comes out ... your done!
-  if( (millis()-lastDrop) > 360000 && Servo_Val < (servo_min + 2)){
-    Serial.println();Serial.println("FINISHED!!!");
+  if ( (millis() - lastDrop) > 360000 && Servo_Val < (servo_min + 2)) {
+    Serial.println(); Serial.println("FINISHED!!!");
     //Blynk.tweet("Brew DONE!!: www.bobbobblogs.blogspot.com");
     myservo.detach();
     thLCD.clear(); // Clear the LCD
     thLCD.print(0, 0, "Finished in:"); // Print top line
     thLCD.print(0, 1, botLine); // Print bottom line
-    while(restart == 0) 
+    while (restart == 0)
     {
       Blynk.run();
       pause_requests(); //accept pause requests
 
-      if (!digitalRead(SleepPin)){
+      if (!digitalRead(SleepPin)) {
         myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
         delay(15);
         myservo.write(servo_max);
-        Serial.println("...Going to Sleep...");         
-        delay(1000);         
+        Serial.println("...Going to Sleep...");
+        delay(1000);
         ESP.deepSleep(0, WAKE_RF_DEFAULT); // Sleep forever, until Pin#16 is un-grounded (button un-pushed)
       }
-      
+
     } // when finished do nothing but listen for Blynk app
     myservo.attach(ServoPIN);
     restart = 0;
     lastDrop = millis();
     Servo_Val = 140;
-    Serial.println();Serial.print("Restarting");delay(700);Serial.print(" .");delay(700);Serial.print(".");delay(700);Serial.print(".");delay(10);Serial.println(" waiting for drops");Serial.println();
+    Serial.println(); Serial.print("Restarting"); delay(700); Serial.print(" ."); delay(700); Serial.print("."); delay(700); Serial.print("."); delay(10); Serial.println(" waiting for drops"); Serial.println();
   }
 }
 
-void drop(){
+void drop() {
   unsigned long interrupt_time = millis();
   // If interrupts come faster than 200ms, assume it's a bounce and ignore
-  if (interrupt_time - last_interrupt_time > 50) 
+  if (interrupt_time - last_interrupt_time > 50)
   {
     voltage = 0;
     count++;
