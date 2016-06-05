@@ -569,7 +569,7 @@ void setup(){
 
   WiFiManagerParameter custom_blynk_token("Blynk", "blynk token", blynk_token, 33);
   WiFiManager wifiManager;
-  wifiManager.resetSettings(); //leave commented to save settings after connected
+  //wifiManager.resetSettings(); //leave commented to save settings after connected
   wifiManager.addParameter(&custom_blynk_token);
   wifiManager.autoConnect("Drop-BOB");
   Blynk.config(custom_blynk_token.getValue());
