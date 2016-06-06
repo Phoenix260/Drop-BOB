@@ -1,22 +1,24 @@
 /***********************************************************************************************
- *  This sketch is created for use of a cold drip coffeemaker with a THING DEV from Sparkfun using the ESP8266 wifi chip.
- *  Copyright: Bobby Lumia, may be used and modified for personal use only. No resale.
- *  Please reference my project blog: http://bobbobblogs.blogspot.ca/ if using this sketch in your work.
- *  When uploading to ESP8266 with Version 2.2 in Arduino boards use 80MHz and 115200 to prevent board crashes (known issue 
- *  with servo on 160Mhz)
- *  
- *  NOTE: IN ORDER TO PROGRAM, YOU NEED TO REMOUVE THE JUMPER. // Possibly // Not Not always required ... actually never 
- *  required. dunno why
- *  
- *  Resources: Blynk Arduino Library: https://github.com/blynkkk/blynk-library/releases/tag/v0.3.1
- *  
- *  Additional Boards Manager: http://arduino.esp8266.com/stable/package_esp8266com_index.json
- *  Then install ESP8266 in Additional boards to select the Sparkfun ESP8266 Thing Dev 
- *  
- *  Development environment specifics:
- *  Arduino IDE 1.6.9
- *  SparkFun ESP8266 Thing Dev: https://www.sparkfun.com/products/13711
+    This sketch is created for use of a cold drip coffeemaker with a THING DEV from Sparkfun using the ESP8266 wifi chip.
+    Copyright: Bobby Lumia, may be used and modified for personal use only. No resale.
+    Please reference my project blog: http://bobbobblogs.blogspot.ca/ if using this sketch in your work.
+    When uploading to ESP8266 with Version 2.2 in Arduino boards use 80MHz and 115200 to prevent board crashes (known issue
+    with servo on 160Mhz)
+
+    NOTE: IN ORDER TO PROGRAM, YOU NEED TO REMOUVE THE JUMPER. // Possibly // Not Not always required ... actually never
+    required. dunno why
+
+    Resources: Blynk Arduino Library: https://github.com/blynkkk/blynk-library/releases/tag/v0.3.1
+
+    Additional Boards Manager: http://arduino.esp8266.com/stable/package_esp8266com_index.json
+    Then install ESP8266 in Additional boards to select the Sparkfun ESP8266 Thing Dev
+
+    Development environment specifics:
+    Arduino IDE 1.6.9
+    SparkFun ESP8266 Thing Dev: https://www.sparkfun.com/products/13711
 ************************************************************************************************/
+
+#include <FS.h>                   //Include File System (to save parameter data). this needs to be first
 
 ////////////////////////////////////
 // Blynk Virtual Variable Mapping //
@@ -28,7 +30,7 @@
 #define DPM_SLIDER              V3
 #define DROP_COUNT_VIRTUAL_PIN  V4
 #define UPTIME_VIRTUAL_PIN      V5
-#define RESTART_BTN             V6
+#define RESTART_BTN             V6 // Should change this to a "BREAK" Button ... and Add official reset Button ESP.reset();
 #define DPM_avg_VIRTUAL_PIN     V7
 #define PAUSE_BTN               V8
 #define SERVO_SLIDER            V9
@@ -43,6 +45,7 @@
 #define MODE_DROPDOWN           V18
 #define MENU_DROPDOWN           V19
 #define SERVO_UPDATE_SPEED_VPIN V20
+#define CLEAR_SAVED_SETTINGS    V21
 
 /////////////////////////////////////////
 // Hardware Definitions                //
@@ -73,9 +76,11 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <BlynkSimpleEsp8266.h>
-#include <DNSServer.h>
-#include <ESP8266WebServer.h>
-#include <WiFiManager.h> //https://github.com/tzapu/WiFiManager
+#include <ESP8266WiFi.h>          //ESP8266 Core WiFi Library
+#include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
+#include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
+#include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
+#include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
 
 ////////////////////////////////////
 // Variables .................... //
@@ -84,7 +89,8 @@
 char blynk_token[33]; //"Token to be entered in browser";
 SimpleTimer timer;
 
-WidgetLCD thLCD(LCD_VIRTUAL); // LCD widget, updated in blynkLoop
+WidgetLCD thLCD(LCD_VIRTUAL); // LCD widget. Global intialization.
+WiFiManager wifiManager; //WiFiManager. Global intialization.
 
 //================================\/ PID \/=============
 unsigned long lastTime = 0;
@@ -124,6 +130,7 @@ double time_now = 0;
 int close_increment = 1;
 int open_increment = 1;
 bool isFirstConnect = true;
+bool shouldSaveConfig = false;
 
 // Time until sleep (in seconds):
 const int sleepTimeS = 0;
@@ -179,18 +186,6 @@ void pause_requests() {
     thLCD.print(0, 0, "Paused ..."); // Print top line
     thLCD.print(0, 1, "Valve Closed"); // Print bottom line
 
-    if (!digitalRead(SleepPin)) {
-      myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-      delay(15);
-      myservo.write(servo_max);
-      Serial.println("...Going to Sleep...");
-      thLCD.clear(); // Clear the LCD
-      thLCD.print(0, 0, "Going to Sleep"); // Print top line
-      thLCD.print(0, 1, "zzzzzzzzzzzzzZ"); // Print bottom line
-      delay(1000);
-      ESP.deepSleep(0, WAKE_RF_DEFAULT); // Sleep forever, until Pin#16 is un-grounded (button un-pushed)
-    }
-
     int lapse = millis() - slide_time;
 
     if (slide_time == 0) {                 // If the pause comes from the app, close the servo to prevent drops (true pause)
@@ -220,10 +215,8 @@ void pause_requests() {
 }
 
 BLYNK_WRITE(SIM_DROP) { //pushbutton in Blynk app that simulates a drop of water (for testing) - INPUT
-  if (param.asInt() == 1) {
-    voltage = 0;
-    button = 1;
-  }
+  voltage = 0;
+  button = 1;
 }
 
 BLYNK_WRITE(DPM_SLIDER) { //"Blynk slider for DPM setting" - INPUT
@@ -244,6 +237,15 @@ BLYNK_WRITE(SERVO_SLIDER) { //is "Blynk Manual servo control" - INPUT
   pause = 1;
   slide_time = millis();
   Servo_Val = param.asInt();
+}
+
+BLYNK_WRITE(CLEAR_SAVED_SETTINGS) { //is "Blynk's clear ALL Settings config Pin" - INPUT
+  wifiManager.resetSettings();  //clear settings
+  SPIFFS.format();              //clear File System
+  Serial.println("settings cleared ... RESETTING");
+  delay(3000);
+  ESP.reset();
+  delay(5000);
 }
 
 void open_up() {
@@ -276,15 +278,6 @@ void tune() {
 
       while (voltage == 5.0) {
         Blynk.run();
-
-        if (!digitalRead(SleepPin)) {
-          myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-          delay(15);
-          myservo.write(servo_max);
-          Serial.println("...Going to Sleep...");
-          delay(1000);
-          ESP.deepSleep(0, WAKE_RF_DEFAULT); // Sleep forever, until Pin#16 is un-grounded (button un-pushed)
-        }
 
         timer.run();
         pause_requests();
@@ -399,22 +392,30 @@ BLYNK_WRITE(MODE_DROPDOWN) { //Dropdown selection of MODE - INPUT
 }
 
 BLYNK_WRITE(MENU_DROPDOWN) { //Menu dropdown
-  if (param.asInt() == 1) {
+  if (param.asInt() == 1) { // BREAK/RESTART
     restart = 1;
   }
-  if (param.asInt() == 2) {
+  if (param.asInt() == 2) { //PAUSE
     pause = 1;
     delay(15);
     pause_requests();
   }
-  if (param.asInt() == 3) {
+  if (param.asInt() == 3) { //RE-TUNE
     thLCD.clear(); // Clear the LCD
     thLCD.print(0, 0, "Tuning Mode"); // Print top line
     thLCD.print(0, 1, "Please Wait"); // Print bottom line
     tune();
   }
-  if (param.asInt() == 4) {
+  if (param.asInt() == 4) {//SIMULATE DROP
     voltage = 0;
+  }
+  if (param.asInt() == 5) { //CLEAR ALL SAVED SETTINGS
+    wifiManager.resetSettings();  //clear settings
+    SPIFFS.format();              //clear File System
+    Serial.println("settings cleared ... RESETTING");
+    delay(3000);
+    ESP.reset();
+    delay(5000);
   }
 
 }
@@ -612,16 +613,96 @@ BLYNK_CONNECTED() {
   }
 }
 
+void saveConfigCallback () {
+  Serial.println("Should save config");
+  shouldSaveConfig = true;
+}
+
 void setup() {
   Serial.begin(9600);
   delay(10);
 
+  //read configuration from FS json
+  Serial.println("mounting FS...");
+
+  if (SPIFFS.begin()) {
+    Serial.println("mounted file system");
+    if (SPIFFS.exists("/config.json")) {
+      //file exists, reading and loading
+      Serial.println("reading config file");
+      File configFile = SPIFFS.open("/config.json", "r");
+      if (configFile) {
+        Serial.println("opened config file");
+        size_t size = configFile.size();
+        // Allocate a buffer to store contents of the file.
+        std::unique_ptr<char[]> buf(new char[size]);
+
+        configFile.readBytes(buf.get(), size);
+        DynamicJsonBuffer jsonBuffer;
+        JsonObject& json = jsonBuffer.parseObject(buf.get());
+        json.printTo(Serial);
+        if (json.success()) {
+          Serial.println("\nparsed json");
+          strcpy(blynk_token, json["blynk_token"]);
+
+        } else {
+          Serial.println("failed to load json config");
+        }
+      }
+    }
+  } else {
+    Serial.println("failed to mount FS");
+  }
+  //end read
+
+  // The extra parameters to be configured (can be either global or just in the setup)
+  // After connecting, parameter.getValue() will get you the configured value
+  // id/name placeholder/prompt default length
   WiFiManagerParameter custom_blynk_token("Blynk", "blynk token", blynk_token, 33);
-  WiFiManager wifiManager;
-  //wifiManager.resetSettings(); //leave commented to save settings after connected
+
+  //set config save notify callback
+  wifiManager.setSaveConfigCallback(saveConfigCallback);
+
+  //wifiManager.resetSettings();  //leave commented to save settings after connected
+  //SPIFFS.format();              //clean FS, for testing only
+
   wifiManager.addParameter(&custom_blynk_token);
-  wifiManager.autoConnect("Drop-BOB");
-  Blynk.config(custom_blynk_token.getValue());
+
+  if (!wifiManager.autoConnect("Drop-BOB")) {
+    Serial.println("failed to connect and hit timeout");
+    delay(3000);
+    //reset and try again
+    ESP.reset();
+    delay(5000);
+  }
+
+  //if you get here you have connected to the WiFi
+  Serial.println("connected...yeey :)");
+
+  strcpy(blynk_token, custom_blynk_token.getValue());
+
+  //save the custom parameters to FS
+  if (shouldSaveConfig) {
+    Serial.println("saving config");
+    DynamicJsonBuffer jsonBuffer;
+    JsonObject& json = jsonBuffer.createObject();
+    json["blynk_token"] = blynk_token;
+
+    File configFile = SPIFFS.open("/config.json", "w");
+    if (!configFile) {
+      Serial.println("failed to open config file for writing");
+    }
+
+    json.printTo(Serial);
+    json.printTo(configFile);
+    configFile.close();
+    //end save
+
+    Serial.println("local ip");
+    Serial.println(WiFi.localIP());
+  }
+
+  Blynk.config(blynk_token);
 
   while ( abs(myservo.read() - Servo_Val) < Servo_movements + 1) {
 
@@ -652,7 +733,8 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(photo_interuptor_PIN), drop, FALLING); //possibly also Mode LOW instead of FALLING
   pinMode(ServoPIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
-  pinMode(SleepPin, INPUT_PULLUP); //Set Sleep monitor pin as INPUT ... also make it pullup to HIGH by default
+  pinMode(SleepPin, INPUT);
+  attachInterrupt(digitalPinToInterrupt(SleepPin), sleep_switch, FALLING); //Set Sleep monitor pin as INTERUPT... HIGH by default
   pinMode(WakePin, INPUT_PULLUP); //Set Wake monitor pin as INPUT ... also make it pullup to HIGH by default
 
   // Blink the LED pin during setup (for fun)
@@ -716,21 +798,6 @@ void loop() {
     thLCD.print(0, 1, botLine); // Print bottom line
   }
 
-  if (!digitalRead(SleepPin)) { //Monitor sleep/wake switch
-    myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-    delay(15);
-    myservo.write(servo_max);
-    Serial.println("...Going to Sleep...");
-    delay(1000);
-    ESP.deepSleep(0, WAKE_RF_DEFAULT); // Sleep forever, until Pin#16 is un-grounded (button un-pushed)
-  }
-
-  //int raw = analogRead(photo_interuptor_PIN); // read the drop sensor
-
-  /*if(button == 0){ //Sim drop button on Blynk makes this button var = 1 ... so it skips this and manually trips the voltage
-    voltage = 5.0 * raw / 1023; // convert it to voltage
-    }*/
-
   if ( (Mode == 1) | (Mode == 2) ) { //Only if Mode = Normal (1) or Agressive (2) do this
     Servo_angle_method();
   }
@@ -741,8 +808,6 @@ void loop() {
 
   if ( (millis() - Servo_adjust) > Servo_update_Speed) {
     Servo_adjust = millis();
-
-    //Serial.print(myservo.read()); Serial.print(" "); Serial.print(Servo_movements); Serial.print(" "); Serial.println(Servo_Val);
 
     if (myservo.read() < Servo_Val) {
       myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
@@ -803,5 +868,17 @@ void drop() {
     //Serial.println("Drop");
   }
   last_interrupt_time = interrupt_time;
+}
+
+void sleep_switch() {
+  myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
+  delay(15);
+  myservo.write(servo_max);
+  Serial.println("...Going to Sleep...");
+  thLCD.clear(); // Clear the LCD
+  thLCD.print(0, 0, "Going to Sleep"); // Print top line
+  thLCD.print(0, 1, "zzzzzzzzzzzzzZ"); // Print bottom line
+  delay(1000);
+  ESP.deepSleep(0, WAKE_RF_DEFAULT); // Sleep forever, until Pin#16 is un-grounded (button un-pushed)
 }
 
