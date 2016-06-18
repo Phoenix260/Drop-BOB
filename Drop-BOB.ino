@@ -19,7 +19,7 @@
 
     NOTES:  - Upload from Aurduino only at 80Mhz
             - On the Blynk App make sure all widgets are "PUSH" ... setting manual intervals slows down this code
-            - 
+            -
 ************************************************************************************************/
 
 #include <FS.h>                   //Include File System (to save parameter data). this needs to be first
@@ -195,7 +195,7 @@ void pause_requests() {
       Serial.println("pause_requests()");
     }
     //if (Blynk.connected()) {
-      Blynk.run();
+    Blynk.run();
     //}
     thLCD.clear(); // Clear the LCD
     thLCD.print(0, 0, "Paused ..."); // Print top line
@@ -235,10 +235,10 @@ BLYNK_WRITE(SIM_DROP) { //pushbutton in Blynk app that simulates a drop of water
 }
 
 BLYNK_WRITE(DropBOB_DEBUG) {
-  if(param.asInt() == 1){
+  if (param.asInt() == 1) {
     debug = 1;
   }
-  else if(param.asInt() == 0){
+  else if (param.asInt() == 0) {
     debug = 0;
   }
 }
@@ -317,7 +317,7 @@ void tune() {
         //drop_no_interupt();
 
         //if (Blynk.connected()) {
-          Blynk.run();
+        Blynk.run();
         //}
         timer.run();
 
@@ -368,16 +368,12 @@ void tune() {
         Serial.print("\t");
         Serial.print(myservo.read()); Serial.print("\t"); Serial.println("Servo_val");
 
-        if ((millis() - uptime) > 1000) { //update tuning vars ON BLYNK only once per second (to save time
-          uptime = millis();
-
-          Blynk.virtualWrite(DPM_VIRTUAL_PIN, DPM);
-          Blynk.virtualWrite(DPM_avg_VIRTUAL_PIN, DPM_avg);
-          Blynk.virtualWrite(DROP_COUNT_VIRTUAL_PIN, count);
-          Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
-          Blynk.virtualWrite(SETPOINT_DPM_VIRT_PIN, set_DPM);
-          topLine = "Tuning Mode     "; //LCD title
-        }
+        Blynk.virtualWrite(DPM_VIRTUAL_PIN, DPM);
+        Blynk.virtualWrite(DPM_avg_VIRTUAL_PIN, DPM_avg);
+        Blynk.virtualWrite(DROP_COUNT_VIRTUAL_PIN, count);
+        Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
+        Blynk.virtualWrite(SETPOINT_DPM_VIRT_PIN, set_DPM);
+        topLine = "Tuning Mode     "; //LCD title
       }
     }
 
@@ -504,28 +500,24 @@ void print_stats() {
     Serial.print("\t");
     Serial.print(kd * dErr); Serial.print("\t"); Serial.println("dErr"); //*/
 
-    if ((millis() - uptime) > 500) { //update tuning vars ON BLYNK only once per second (to save time
-      uptime = millis();
+    Blynk.virtualWrite(DPM_VIRTUAL_PIN, DPM);
+    yield();
+    Blynk.virtualWrite(DPM_avg_VIRTUAL_PIN, DPM_avg);
+    yield();
+    Blynk.virtualWrite(DROP_COUNT_VIRTUAL_PIN, count);
+    yield();
+    Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
+    yield();
+    Blynk.virtualWrite(SETPOINT_DPM_VIRT_PIN, set_DPM);
+    yield();
+    Blynk.virtualWrite(SERVO_UPDATE_SPEED_VPIN, Servo_update_Speed);
 
-      Blynk.virtualWrite(DPM_VIRTUAL_PIN, DPM);
-      yield();
-      Blynk.virtualWrite(DPM_avg_VIRTUAL_PIN, DPM_avg);
-      yield();
-      Blynk.virtualWrite(DROP_COUNT_VIRTUAL_PIN, count);
-      yield();
-      Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
-      yield();
-      Blynk.virtualWrite(SETPOINT_DPM_VIRT_PIN, set_DPM);
-      yield();
-      Blynk.virtualWrite(SERVO_UPDATE_SPEED_VPIN, Servo_update_Speed);
-
-      if (debug == 1) {
-        Serial.print("print_stats(");
-        Serial.print("time it took to upload: ");
-        Serial.print(millis() - uptime);
-        Serial.print("-ms");
-        Serial.println(")");
-      }
+    if (debug == 1) {
+      Serial.print("print_stats(");
+      Serial.print("time it took to upload: ");
+      Serial.print(millis() - uptime);
+      Serial.print("-ms");
+      Serial.println(")");
     }
   }
 }
@@ -707,7 +699,7 @@ void run_blynk() {
   }
   yield();
   //if (Blynk.connected()) {
-    Blynk.run();
+  Blynk.run();
   //}
 }
 
@@ -746,7 +738,7 @@ void saveConfigCallback () {
   shouldSaveConfig = true;
 }
 
-void UpTime(){
+void UpTime() {
   if ((millis() - uptime) > 1000) { //update uptime LCD & uptime variable
     if (debug == 1) {
       Serial.print("loop(");
@@ -918,7 +910,7 @@ void setup() {
 
   //Blynk.tweet("Brewing a fresh pot of Cold Drip Coffee with my Drop-BOB v1.0: Check it out at www.bobbobblogs.blogspot.com");
 
-  timer.setInterval(500L, run_blynk); 
+  timer.setInterval(500L, run_blynk);
   timer.setInterval(5000L, open_up); // open up the servo every 5 seconds if no drops come ... not a Blynk update
   //timer.setInterval(60000L, reconnectBlynk); //only atempt reconnection once per minute
 
@@ -931,7 +923,7 @@ void loop() {
   }
   pause_requests(); //accept pause requests
   //if (Blynk.connected()) {
-    Blynk.run();
+  Blynk.run();
   //}
   timer.run(); // Initiates SimpleTimer
   digitalWrite(LED_PIN, HIGH); // for some odd reason ... LED PIN to "HIGH" means "off"
@@ -989,7 +981,7 @@ void loop() {
     while (restart == 0)
     {
       //if (Blynk.connected()) {
-        Blynk.run();
+      Blynk.run();
       //}
       pause_requests(); //accept pause requests
 
@@ -1011,7 +1003,7 @@ void loop() {
   }
 }
 
- void drop_interrupt() {
+void drop_interrupt() {
   // If interrupts come faster than X-ms, assume it's a bounce and ignore
   if (millis() - last_interrupt_time > 70)
   {
@@ -1022,7 +1014,7 @@ void loop() {
     count++;
     last_interrupt_time = millis();
   }
- }
+}
 
 
 void drop_no_interupt() {
@@ -1041,11 +1033,11 @@ void sleep_switch() { //Interupt
   if (debug == 1) {
     Serial.println("sleep_switch()");
   }
-  
+
   myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
   delay(25);
   myservo.write(servo_max);
-  
+
   Serial.println("...Going to Sleep...");
   thLCD.clear(); // Clear the LCD
   thLCD.print(0, 0, "Going to Sleep"); // Print top line
