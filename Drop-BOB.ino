@@ -314,12 +314,14 @@ void tune() {
 
       while (voltage > 0) {
 
-        drop_no_interupt();
+        //drop_no_interupt();
 
         //if (Blynk.connected()) {
           Blynk.run();
         //}
         timer.run();
+
+        UpTime();
 
         if (first_tune == 1) {
           Servo_Val -= 1;
@@ -374,27 +376,7 @@ void tune() {
           Blynk.virtualWrite(DROP_COUNT_VIRTUAL_PIN, count);
           Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
           Blynk.virtualWrite(SETPOINT_DPM_VIRT_PIN, set_DPM);
-          thLCD.print(0, 0, "Tuning Mode     "); // Print top line
-          uptime = millis();
-          botLine = "";
-          seconds = (float)millis() / 1000;
-          minutes = seconds / 60;
-          hours = minutes / 60;
-          days = hours / 24;
-          seconds = (int)seconds % 60;
-          minutes = (int)minutes % 60;
-          hours = (int)hours % 24;
-          // Construct a string indicating run time
-          if (days < 10) botLine += "0"; // Add the leading 0
-          botLine += String((int)days) + "-";
-          if (hours < 10) botLine += "0"; // Add the leading 0
-          botLine += String((int)hours) + ":";
-          if (minutes < 10) botLine += "0"; // Add the leading 0
-          botLine += String((int)minutes) + ":";
-          if (seconds < 10) botLine += "0"; // Add the leading 0
-          botLine += String((int)seconds);
-          botLine += "     ";
-          thLCD.print(0, 1, botLine); // Print bottom line
+          topLine = "Tuning Mode     "; //LCD title
         }
       }
     }
@@ -764,6 +746,46 @@ void saveConfigCallback () {
   shouldSaveConfig = true;
 }
 
+void UpTime(){
+  if ((millis() - uptime) > 1000) { //update uptime LCD & uptime variable
+    if (debug == 1) {
+      Serial.print("loop(");
+      Serial.print("uptime: ");
+      Serial.print(millis());
+      Serial.print("-s");
+      Serial.println(")");
+    }
+    uptime = millis();
+    botLine = "";
+    seconds = (float)millis() / 1000;
+    minutes = seconds / 60;
+    hours = minutes / 60;
+    days = hours / 24;
+    seconds = (int)seconds % 60;
+    minutes = (int)minutes % 60;
+    hours = (int)hours % 24;
+    // Construct a string indicating run time
+    if (days < 10) botLine += "0"; // Add the leading 0
+    botLine += String((int)days) + "-";
+    if (hours < 10) botLine += "0"; // Add the leading 0
+    botLine += String((int)hours) + ":";
+    if (minutes < 10) botLine += "0"; // Add the leading 0
+    botLine += String((int)minutes) + ":";
+    if (seconds < 10) botLine += "0"; // Add the leading 0
+    botLine += String((int)seconds);
+    botLine += "     ";
+    thLCD.print(0, 0, topLine); // Print top line
+    thLCD.print(0, 1, botLine); // Print bottom line
+    if (debug == 1) {
+      Serial.print("loop(");
+      Serial.print("time it took to upload: ");
+      Serial.print(millis() - uptime);
+      Serial.print("-ms");
+      Serial.println(")");
+    }
+  }
+}
+
 void setup() {
   Serial.begin(19200);
   delay(10);
@@ -870,8 +892,6 @@ void setup() {
 
   }
 
-  topLine = "MODE: Normal :) "; //startup in Normal mode. Show this on LCD
-
   Serial.println("DropBOB v2.5");
   Serial.println();
 
@@ -879,9 +899,7 @@ void setup() {
     readings[thisReading] = 0; // Initialize the array
 
   pinMode(photo_interuptor_PIN, INPUT);
-  //Not going to be using the interupt for Drop counting ... it causes too many issues with Blynk connectivity
-  //Maybe for a future update ...
-  //attachInterrupt(digitalPinToInterrupt(photo_interuptor_PIN), drop, FALLING); //possibly also Mode: LOW(no good),FALLING(best),CHANGE(too many),RISING(no)
+  attachInterrupt(digitalPinToInterrupt(photo_interuptor_PIN), drop_interrupt, FALLING); //possibly also Mode: LOW(no good),FALLING(best),CHANGE(too many),RISING(no)
   pinMode(ServoPIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
   pinMode(SleepPin, INPUT_PULLUP);
@@ -918,46 +936,10 @@ void loop() {
   timer.run(); // Initiates SimpleTimer
   digitalWrite(LED_PIN, HIGH); // for some odd reason ... LED PIN to "HIGH" means "off"
 
-  //--->Remouve this for Interupt driven sensing
-  drop_no_interupt();
+  //--->Remouve this for Interupt driven sensing ... Add it to remouve the interrupt
+  //drop_no_interupt();
 
-  if ((millis() - uptime) > 1000) { //update uptime LCD & uptime variable
-    if (debug == 1) {
-      Serial.print("loop(");
-      Serial.print("uptime: ");
-      Serial.print(millis());
-      Serial.print("-s");
-      Serial.println(")");
-    }
-    uptime = millis();
-    botLine = "";
-    seconds = (float)millis() / 1000;
-    minutes = seconds / 60;
-    hours = minutes / 60;
-    days = hours / 24;
-    seconds = (int)seconds % 60;
-    minutes = (int)minutes % 60;
-    hours = (int)hours % 24;
-    // Construct a string indicating run time
-    if (days < 10) botLine += "0"; // Add the leading 0
-    botLine += String((int)days) + "-";
-    if (hours < 10) botLine += "0"; // Add the leading 0
-    botLine += String((int)hours) + ":";
-    if (minutes < 10) botLine += "0"; // Add the leading 0
-    botLine += String((int)minutes) + ":";
-    if (seconds < 10) botLine += "0"; // Add the leading 0
-    botLine += String((int)seconds);
-    botLine += "     ";
-    thLCD.print(0, 0, topLine); // Print top line
-    thLCD.print(0, 1, botLine); // Print bottom line
-    if (debug == 1) {
-      Serial.print("loop(");
-      Serial.print("time it took to upload: ");
-      Serial.print(millis() - uptime);
-      Serial.print("-ms");
-      Serial.println(")");
-    }
-  }
+  UpTime();
 
   if ( (Mode == 1) | (Mode == 2) ) { //Only if Mode = Normal (1) or Agressive (2) do this
     Servo_angle_method();
@@ -1029,18 +1011,19 @@ void loop() {
   }
 }
 
-/* this is the interrupt driven drop counting ... It causes problems
-  void drop() {
+ void drop_interrupt() {
   // If interrupts come faster than X-ms, assume it's a bounce and ignore
-  Serial.println("8");
   if (millis() - last_interrupt_time > 70)
   {
+    if (debug == 1) {
+      Serial.println("drop_interrupt() ... ... ...");
+    }
     voltage = 0;
     count++;
     last_interrupt_time = millis();
   }
-  }
-*/
+ }
+
 
 void drop_no_interupt() {
   raw = analogRead(photo_interuptor_PIN); // read the drop sensor
