@@ -346,7 +346,7 @@ void tune() {
 
     for (int run_tune = 0; run_tune < tuning_drops; run_tune++) {
 
-      reconnectBlynk();
+      //reconnectBlynk();
 
       while (voltage > 0) {
 
@@ -397,9 +397,9 @@ void tune() {
       }
 
       if (DPM_avg < 100 && is_servo_min_tuned == 0 && tuned != 1) { //not done yet .. need to fully open until 100-DPM to get servo_min value
-        
-        reconnectBlynk();
-        
+
+        //reconnectBlynk();
+
         while (DPM_avg < 100 || count < 20) {
 
           if (Blynk.connected()) {
@@ -447,7 +447,7 @@ void tune() {
 
       if (DPM <= 6 && count > 10 && tuned != 1) { //if DPM less than of equal to 6 DPM. EXIT, this gives closed value by adding 10
         closed_to_stop = Servo_Val + 10;
-        servo_max = Servo_Val + 25;
+        servo_max = Servo_Val + 5;
         Blynk.virtualWrite(SERVO_MAX_PIN, servo_max);
         if (closed_to_stop > servo_max) {
           closed_to_stop = servo_max;
@@ -695,6 +695,8 @@ void Servo_angle_method() { //(NORMAL & AGRESSIVE MODE) The servo angle is adjus
       Serial.println("Servo_angle_method()");
     }
 
+    if(Servo_Val >= servo_max){servo_max++;if (servo_max > 180) {servo_max = 180;}}
+
     state = LOW;
     measure_DPM();
     voltage = 5.0;
@@ -758,6 +760,9 @@ void Speed_to_open_method() { //(FORCED MODE) The speed at which the servo is op
     if (debug >= 1) {
       Serial.println("Speed_to_open_method()");
     }
+
+    if(Servo_Val >= servo_max){servo_max++;if (servo_max > 180) {servo_max = 180;}}
+    
     voltage = 5.0;
     measure_DPM();
     open_to_drop = Servo_Val; // record the opening angle that caused a drop
@@ -768,7 +773,7 @@ void Speed_to_open_method() { //(FORCED MODE) The speed at which the servo is op
     //Serial.print("Servo val: ");Serial.println(Servo_Val);
 
     record_count = count;
-    while (myservo.read() < (servo_max - Servo_movements)) {
+    while (myservo.read() < (servo_max - Servo_movements) && myservo.read() < 180) {
       myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
       if (Servo_update_Speed > (close_factor * 5)) {
         delay(Servo_update_Speed / close_factor); //don't go less than 5ms
@@ -939,6 +944,10 @@ void setup() {
   //read configuration from FS json
   Serial.println("mounting FS...");
 
+  thLCD.clear(); // Clear the LCD
+  thLCD.print(0, 0, "Starting up ... "); // Print top line
+  thLCD.print(0, 1, "TuningMode(5min)"); // Print bottom line
+
   if (SPIFFS.begin()) {
     Serial.println("mounted file system");
     if (SPIFFS.exists("/config.json")) {
@@ -1048,6 +1057,26 @@ void setup() {
   pinMode(ServoPIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
   pinMode(SleepPin, INPUT_PULLUP);
+
+  delay(25);
+  Serial.println(!digitalRead(SleepPin));
+  delay(25);
+
+  if (!digitalRead(SleepPin)) {
+    while (!digitalRead(SleepPin)) {
+      digitalWrite(LED_PIN, LOW);  led_gp5 = LOW;
+      delay(50);
+      digitalWrite(LED_PIN, HIGH); led_gp5 = HIGH;
+      delay(50);
+    }
+    wifiManager.resetSettings();  //clear settings
+    SPIFFS.format();              //clear File System
+    Serial.println("settings cleared ... RESETTING");
+    delay(3000);
+    ESP.restart();
+    delay(5000);
+  }
+
   attachInterrupt(digitalPinToInterrupt(SleepPin), sleep_switch, FALLING); //Set Sleep monitor pin as INTERUPT... HIGH by default
   pinMode(WakePin, INPUT_PULLUP); //Set Wake monitor pin as INPUT ... also make it pullup to HIGH by default
 
@@ -1067,7 +1096,7 @@ void setup() {
   timer.setInterval(10000L, open_up); // open up the servo every 30 seconds if no drops come ... not a Blynk update
   timer.setInterval(60000L, reconnectBlynk); //only atempt reconnection once per minute
 
-  reconnectBlynk();
+  //reconnectBlynk();
   tune(); //start by tuning the system
 }//================================================================================END SETUP========================
 
@@ -1087,14 +1116,14 @@ void loop() {
   //--->Remouve this for Interupt driven sensing ... Add it to remouve the interrupt
   //drop_no_interupt();
 
-  //UpTime(); //Uptime takes away about 100ms
-
   if ( (Mode == 1) || (Mode == 2) ) { //Only if Mode = Normal (1) or Agressive (2) do this
     Servo_angle_method();
     if (Mode == 1) {
+      UpTime(); //Uptime takes away about 100ms
       topLine = "MODE: Normal :) ";
     }
     if (Mode == 2) {
+      UpTime(); //Uptime takes away about 100ms
       topLine = "MODE: AGRESSIVE!";
     }
   }
@@ -1102,6 +1131,7 @@ void loop() {
   if (Mode == 3) { //Only if Mode = Forced (3) do this
     Speed_to_open_method();
     if (Mode == 3) {
+      //can't show uptime on Forced Mode ... Too much servo interference
       topLine = "MODE: FoRcEd ;] ";
     }
   }
@@ -1230,5 +1260,6 @@ void sleep_switch() { //Interupt
   thLCD.print(0, 1, "zzzzzzzzzzzzzZ"); // Print bottom line
   delay(1000);
   ESP.deepSleep(0, WAKE_RF_DEFAULT); // Sleep forever, until Pin#16 is un-grounded (button un-pushed)
+  delay(1000);
 }
 
