@@ -1,26 +1,26 @@
 /***********************************************************************************************
-    This sketch is created for use of a cold drip coffeemaker with a THING DEV from Sparkfun using the ESP8266 wifi chip.
-    Copyright: Bobby Lumia, may be used and modified for personal use only. No resale.
-    Please reference my project blog: http://bobbobblogs.blogspot.ca/ if using this sketch in your work.
-    When uploading to ESP8266 with Version 2.2 in Arduino boards use 80MHz and 115200 to prevent board crashes (known issue
-    with servo on 160Mhz)
+   This sketch is created for use of a cold drip coffeemaker with a THING DEV from Sparkfun using the ESP8266 wifi chip.
+   Copyright: Bobby Lumia, may be used and modified for personal use only. No resale.
+   Please reference my project blog: http://bobbobblogs.blogspot.ca/ if using this sketch in your work.
+   When uploading to ESP8266 with Version 2.2 in Arduino boards use 80MHz and 115200 to prevent board crashes (known issue
+   with servo on 160Mhz)
 
-    NOTE: IN ORDER TO PROGRAM, YOU NEED TO REMOUVE THE JUMPER. // Possibly // Not Not always required ... actually never
-    required. dunno why
+   NOTE: IN ORDER TO PROGRAM, YOU NEED TO REMOUVE THE JUMPER. // Possibly // Not Not always required ... actually never
+   required. dunno why
 
-    Resources: Blynk Arduino Library: https://github.com/blynkkk/blynk-library/releases/tag/v0.3.1
+   Resources: Blynk Arduino Library: https://github.com/blynkkk/blynk-library/releases/tag/v0.3.1
 
-    Additional Boards Manager: http://arduino.esp8266.com/stable/package_esp8266com_index.json
-    Then install ESP8266 in Additional boards to select the Sparkfun ESP8266 Thing Dev
+   Additional Boards Manager: http://arduino.esp8266.com/stable/package_esp8266com_index.json
+   Then install ESP8266 in Additional boards to select the Sparkfun ESP8266 Thing Dev
 
-    Development environment specifics:
-    Arduino IDE 1.6.9
-    SparkFun ESP8266 Thing Dev: https://www.sparkfun.com/products/13711
+   Development environment specifics:
+   Arduino IDE 1.6.9
+   SparkFun ESP8266 Thing Dev: https://www.sparkfun.com/products/13711
 
-    NOTES:  - Upload from Aurduino only at 80Mhz
-            - On the Blynk App make sure all widgets are "PUSH". Setting manual intervals slows down this code. If you are getting many APP disconnects (CHECK)
-            - If a Virtual pin does not exist in the APP on your phone, the data will not be logged by BLYNK
-            -
+   NOTES:  - Upload from Aurduino only at 80Mhz
+           - On the Blynk App make sure all widgets are "PUSH". Setting manual intervals slows down this code. If you are getting many APP disconnects (CHECK)
+           - If a Virtual pin does not exist in the APP on your phone, the data will not be logged by BLYNK
+           -
 ************************************************************************************************/
 
 #include <FS.h>                   //Include File System (to save parameter data). this needs to be first
@@ -149,6 +149,7 @@ long servo_min_tune_time = millis();
 int is_close_success = 0;
 int close_factor = 15;
 int record_count = count;
+int isInterrupt = 0;
 
 // Time until sleep (in seconds):
 const int sleepTimeS = 0;
@@ -206,9 +207,9 @@ void pause_requests() {
       Serial.println("pause_requests()");
     }
 
-    if (Blynk.connected()) {
+    //if (Blynk.connected()) {
       Blynk.run();
-    }
+    //}
 
     thLCD.clear(); // Clear the LCD
     thLCD.print(0, 0, "Paused ..."); // Print top line
@@ -282,9 +283,9 @@ BLYNK_WRITE(SERVO_SLIDER) { //is "Blynk Manual servo control" - INPUT
   int slider_time = millis();
   while (millis() - slider_time < 5000) {
     pause_requests(); //accept pause requests
-    if (Blynk.connected()) {
+    //if (Blynk.connected()) {
       Blynk.run();
-    }
+    //}
   }
 }
 
@@ -350,10 +351,12 @@ void tune() {
 
       while (voltage > 0) {
 
-        //drop_no_interupt();
-        if (Blynk.connected()) {
-          Blynk.run();
-        }
+        drop_no_interupt();
+
+        //if (Blynk.connected()) {
+        //  Blynk.run();
+        //}
+        
         timer.run();
 
         topLine = "Tuning Mode     "; //LCD title
@@ -362,7 +365,7 @@ void tune() {
         if (first_tune == 1) {
           Servo_Val -= 1;
           myservo.attach(ServoPIN);
-          delay(70); //Keep this one slow otherwise it will open too quickly and you have too many drops
+          delay(1000); //Keep this one slow otherwise it will open too quickly and you have too many drops
           myservo.write(Servo_Val);
           Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
           open_to_drop = Servo_Val - 10;
@@ -402,10 +405,12 @@ void tune() {
 
         while (DPM_avg < 100 || count < 20) {
 
-          if (Blynk.connected()) {
-            Blynk.run();
-          }
+          //if (Blynk.connected()) {
+          //  Blynk.run();
+          //}
           timer.run();
+
+          drop_no_interupt();
 
           if ((millis() - servo_min_tune_time) > 1000) {
             Servo_Val -= 1;
@@ -491,7 +496,7 @@ BLYNK_WRITE(MODE_DROPDOWN) { //Dropdown selection of MODE - INPUT
     open_factor = 0.5; //std open factor
     kick = 0; // no kick
     kick_delay = 0; // no kick delay
-    DPM_buffer = 1; // 1-DPM buffer
+    DPM_buffer = 0.5; // 1-DPM buffer
     open_bias = 0.8; // no open bias (0 to 1) ... 1 is no bias, 0 is the valve never opens if too closed (good for keeping the valve biased towards les DPM
     open_delay = 1.25; // back to normal tollerance
     topLine = "MODE: Normal :) ";
@@ -695,7 +700,12 @@ void Servo_angle_method() { //(NORMAL & AGRESSIVE MODE) The servo angle is adjus
       Serial.println("Servo_angle_method()");
     }
 
-    if(Servo_Val >= servo_max){servo_max++;if (servo_max > 180) {servo_max = 180;}}
+    if (Servo_Val >= servo_max) {
+      servo_max++;
+      if (servo_max > 180) {
+        servo_max = 180;
+      }
+    }
 
     state = LOW;
     measure_DPM();
@@ -761,8 +771,13 @@ void Speed_to_open_method() { //(FORCED MODE) The speed at which the servo is op
       Serial.println("Speed_to_open_method()");
     }
 
-    if(Servo_Val >= servo_max){servo_max++;if (servo_max > 180) {servo_max = 180;}}
-    
+    if (Servo_Val >= servo_max) {
+      servo_max++;
+      if (servo_max > 180) {
+        servo_max = 180;
+      }
+    }
+
     voltage = 5.0;
     measure_DPM();
     open_to_drop = Servo_Val; // record the opening angle that caused a drop
@@ -772,7 +787,10 @@ void Speed_to_open_method() { //(FORCED MODE) The speed at which the servo is op
 
     //Serial.print("Servo val: ");Serial.println(Servo_Val);
 
-    record_count = count;
+    if(isInterrupt == 1){ //only do this if interrupts are on ... doesn't make sence without
+      record_count = count;
+    }
+    
     while (myservo.read() < (servo_max - Servo_movements) && myservo.read() < 180) {
       myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
       if (Servo_update_Speed > (close_factor * 5)) {
@@ -788,23 +806,27 @@ void Speed_to_open_method() { //(FORCED MODE) The speed at which the servo is op
         Serial.print("Speed_to_open_method("); Serial.print("closing valve: "); Serial.print(myservo.read()); Serial.println(")");
       }
     }
-    if (count > record_count) {
-      if (close_factor < 100) {
-        close_factor += 1;
-        if (debug >= 1) {
-          Serial.println("%%close_factor ++%%");
+
+    if(isInterrupt == 1){ //only do this if interrupts are on ... doesn't make sence without
+      if (count > record_count) {
+        if (close_factor < 100) {
+          close_factor += 1;
+          if (debug >= 1) {
+            Serial.println("%%close_factor ++%%");
+          }
         }
+      } else {
+        is_close_success += 1;
       }
-    } else {
-      is_close_success += 1;
-    }
-    if (is_close_success > 10) {
-      if (close_factor > 1) {
-        close_factor -= 1;
-        if (debug >= 1) {
-          Serial.println("%%close_factor --%%");
-        }
-      } is_close_success = 0;
+      
+      if (is_close_success > 10) {
+        if (close_factor > 1) {
+          close_factor -= 1;
+          if (debug >= 1) {
+            Serial.println("%%close_factor --%%");
+          }
+        } is_close_success = 0;
+      }
     }
 
     /*Compute all the working error variables*/
@@ -854,9 +876,9 @@ void run_blynk() {
     Serial.println("run_blynk()");
   }
   yield();
-  if (Blynk.connected()) {
+  //if (Blynk.connected()) {
     Blynk.run();
-  }
+  //}
 }
 
 BLYNK_CONNECTED() {
@@ -1031,13 +1053,13 @@ void setup() {
 
     if (myservo.read() > Servo_Val ) {
       myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-      delay(15);
+      delay(1000);
       myservo.write(myservo.read() - Servo_movements);
       Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
     }
     else if (myservo.read() < Servo_Val) {
       myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-      delay(15);
+      delay(1000);
       myservo.write(myservo.read() + Servo_movements);
       Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
     }
@@ -1053,7 +1075,11 @@ void setup() {
     readings[thisReading] = 0; // Initialize the array
 
   pinMode(photo_interuptor_PIN, INPUT);
-  attachInterrupt(digitalPinToInterrupt(photo_interuptor_PIN), drop_interrupt, FALLING); //possibly also Mode: LOW(no good),FALLING(best),CHANGE(too many),RISING(no)
+
+  if(isInterrupt == 1){
+    attachInterrupt(digitalPinToInterrupt(photo_interuptor_PIN), drop_interrupt, FALLING); //possibly also Mode: LOW(no good),FALLING(best),CHANGE(too many),RISING(no)
+  }
+
   pinMode(ServoPIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
   pinMode(SleepPin, INPUT_PULLUP);
@@ -1092,12 +1118,14 @@ void setup() {
 
   //Blynk.tweet("Brewing a fresh pot of Cold Drip Coffee with my Drop-BOB v1.0: Check it out at www.bobbobblogs.blogspot.com");
 
-  //timer.setInterval(500L, run_blynk);
   timer.setInterval(10000L, open_up); // open up the servo every 30 seconds if no drops come ... not a Blynk update
-  timer.setInterval(60000L, reconnectBlynk); //only atempt reconnection once per minute
 
   //reconnectBlynk();
   tune(); //start by tuning the system
+
+  //these timers should run only after system is tuned (interferes with fast drop reading)
+  timer.setInterval(500L, run_blynk);
+  timer.setInterval(60000L, reconnectBlynk); //only atempt reconnection once per minute
 }//================================================================================END SETUP========================
 
 void loop() {
@@ -1106,15 +1134,14 @@ void loop() {
   }
 
   pause_requests(); //accept pause requests
-  if (Blynk.connected()) {
+  //if (Blynk.connected()) {
     Blynk.run();
-  }
+  //}
   timer.run(); // Initiates SimpleTimer
 
   digitalWrite(LED_PIN, HIGH); // for some odd reason ... LED PIN to "HIGH" means "off"
 
-  //--->Remouve this for Interupt driven sensing ... Add it to remouve the interrupt
-  //drop_no_interupt();
+  drop_no_interupt();
 
   if ( (Mode == 1) || (Mode == 2) ) { //Only if Mode = Normal (1) or Agressive (2) do this
     Servo_angle_method();
@@ -1131,7 +1158,10 @@ void loop() {
   if (Mode == 3) { //Only if Mode = Forced (3) do this
     Speed_to_open_method();
     if (Mode == 3) {
-      //can't show uptime on Forced Mode ... Too much servo interference
+      //NOTE: can't show uptime on Forced Mode with intterrupts ... Too much servo interference.
+      if(isInterrupt == 0){
+        UpTime(); //Uptime takes away about 100ms
+      }
       topLine = "MODE: FoRcEd ;] ";
     }
   }
@@ -1193,9 +1223,9 @@ void loop() {
         thLCD.print(0, 1, botLine); // Print bottom line
         last_interrupt_time = millis();
       }
-      if (Blynk.connected()) {
+      //if (Blynk.connected()) {
         Blynk.run();
-      }
+      //}
       pause_requests(); //accept pause requests
 
       if (!digitalRead(SleepPin)) {
@@ -1232,14 +1262,16 @@ void drop_interrupt() {
 }
 
 void drop_no_interupt() {
-  raw = analogRead(photo_interuptor_PIN); // read the drop sensor
-  if (raw == 0 && (millis() - last_interrupt_drop) > 70) {
-    voltage = 5.0 * raw / 1023; // convert it to voltage
-    if (debug >= 1) {
-      Serial.println("drop_no_interupt() ... ... ... ");
+  if(isInterrupt == 0){
+    raw = analogRead(photo_interuptor_PIN); // read the drop sensor
+    if (raw == 0 && (millis() - last_interrupt_drop) > 70) {
+      voltage = 5.0 * raw / 1023; // convert it to voltage
+      if (debug >= 1) {
+        Serial.println("drop_no_interupt() ... ... ... ");
+      }
+      count++;
+      last_interrupt_drop = millis();
     }
-    count++;
-    last_interrupt_drop = millis();
   }
 }
 
