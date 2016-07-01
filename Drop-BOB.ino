@@ -337,7 +337,7 @@ void tune() {
   if (debug >= 1) {
     Serial.println("tune()");
   }
-  int jerk = 0; //local variable
+  
   tuned = 0;
   for (/*nothing needed here*/; Servo_Val < servo_max; Servo_Val++) {
 
@@ -399,20 +399,10 @@ void tune() {
             Servo_Val -= 1;
             if (Servo_Val < 0) Servo_Val = 0;
             myservo.attach(ServoPIN);
-            delay(25); //Keep this one slow otherwise it will open too quickly and you have too many drops
+            delay(15);
             myservo.write(Servo_Val);
             servo_min = Servo_Val;
             servo_min_tune_time = millis();
-          }
-
-
-          if (Servo_Val == 0 && jerk == 0) { //if full open but still not dropping fast enough, jerk the system a little
-            myservo.attach(ServoPIN);
-            delay(15);
-            myservo.write(servo_max);
-            delay(1000);
-            myservo.write(servo_min);
-            jerk = 1;
           }
 
           if (voltage == 0) {
@@ -432,11 +422,16 @@ void tune() {
       }
 
       if (DPM <= 6 && count > 10 && tuned != 1) { //if DPM less than of equal to 6 DPM. EXIT, this gives closed value by adding 10
-        closed_to_stop = Servo_Val + 10;
-        servo_max = Servo_Val + 5;
-        if (closed_to_stop > servo_max) {
-          closed_to_stop = servo_max;
+        closed_to_stop = Servo_Val + 5;
+        servo_max = Servo_Val + 10;
+        if (closed_to_stop > 180) {
+          closed_to_stop = 180;
         }
+        if (servo_max > 180) {
+          servo_max = 180;
+        }
+        Blynk.virtualWrite(SERVO_MAX_PIN, servo_max);
+        Blynk.virtualWrite(SERVO_MIN_PIN, servo_min);
         tuned = 1;
         if (Servo_Val < servo_min) {
           Servo_Val = servo_min;
@@ -1149,12 +1144,12 @@ void loop() {
   if ( (Mode == 1) || (Mode == 2) ) { //Only if Mode = Normal (1) or Agressive (2) do this
     Servo_angle_method();
     if (Mode == 1) {
-      UpTime(); //Uptime takes away about 100ms
       topLine = "MODE: Normal :) ";
+      UpTime(); //Uptime takes away about 100ms
     }
     if (Mode == 2) {
-      UpTime(); //Uptime takes away about 100ms
       topLine = "MODE: AGRESSIVE!";
+      UpTime(); //Uptime takes away about 100ms
     }
   }
 
@@ -1163,9 +1158,9 @@ void loop() {
     if (Mode == 3) {
       //NOTE: can't show uptime on Forced Mode with intterrupts ... Too much servo interference.
       if (isInterrupt == 0) {
+        topLine = "MODE: FoRcEd ;] ";
         UpTime(); //Uptime takes away about 100ms
       }
-      topLine = "MODE: FoRcEd ;] ";
     }
   }
 
@@ -1212,7 +1207,7 @@ void loop() {
   }
 
   //=============if open to the max for 6 min and nothing comes out ... your done!
-  if ( (millis() - lastDrop) > 360000 && Servo_Val < (servo_min + 2)) {
+  if ( (millis() - lastDrop) > 360000 && Servo_Val < 5) { //Servo must be at least all the way down to 5deg open
     Serial.println(); Serial.println("FINISHED!!!");
     //Blynk.tweet("Brew DONE!!: www.bobbobblogs.blogspot.com");
     myservo.detach();
