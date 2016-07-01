@@ -23,7 +23,23 @@
            -
 ************************************************************************************************/
 
+////////////////////////////////////
+// Included libraries............ //
+////////////////////////////////////
+
 #include <FS.h>                   //Include File System (to save parameter data). this needs to be first
+#include <Servo.h>  // for the servo
+#include <stdlib.h> // Include Standard Library
+#include <SimpleTimer.h> //https://github.com/jfturcot/SimpleTimer
+#include <Wire.h>
+#include <SPI.h>
+#include <BlynkSimpleEsp8266.h>
+#include <ESP8266WiFi.h>          //ESP8266 Core WiFi Library
+#include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
+#include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
+#include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
+#include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
+#include <math.h>                 //used for the complex math fuctions like LOG(X) for the PID
 
 ////////////////////////////////////
 // Blynk Virtual Variable Mapping //
@@ -51,8 +67,7 @@
 #define MENU_DROPDOWN           V19
 #define SERVO_UPDATE_SPEED_VPIN V20
 #define CLEAR_SAVED_SETTINGS    V21
-
-#define BLYNK_PRINT Serial
+#define IS_DONE_VPIN            V22
 
 /////////////////////////////////////////
 // Hardware Definitions                //
@@ -74,43 +89,34 @@
 //! D15 available                    //
 
 ////////////////////////////////////
-// Included libraries............ //
+// Wiget & Object declarations    //
 ////////////////////////////////////
 
-#include <Servo.h>  // for the servo
-#include <stdlib.h> // Include Standard Library
-#include <SimpleTimer.h> //https://github.com/jfturcot/SimpleTimer
-#include <Wire.h>
-#include <SPI.h>
-#include <BlynkSimpleEsp8266.h>
-#include <ESP8266WiFi.h>          //ESP8266 Core WiFi Library
-#include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
-#include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
-#include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
-#include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
-#include <math.h>                 //used for the complex math fuctions like LOG(X) for the PID
+WidgetLCD       thLCD(LCD_VIRTUAL);       // LCD widget. Global intialization.
+WiFiManager     wifiManager;              //WiFiManager. Global intialization.
+WidgetTerminal  terminal(TERMINAL_PIN);   //Terminal widger. Global initialization
+Servo           myservo;                  // create servo object to control a servo
+SimpleTimer     timer;
+#define BLYNK_PRINT Serial
 
 ////////////////////////////////////
 // Variables .................... //
 ////////////////////////////////////
 
+// User values ==========================================================
 char blynk_token[33]; //"Token to be entered in browser";
-SimpleTimer timer;
 
-WidgetLCD thLCD(LCD_VIRTUAL); // LCD widget. Global intialization.
-WiFiManager wifiManager; //WiFiManager. Global intialization.
-
-WidgetTerminal terminal(TERMINAL_PIN); //Terminal widger. Global initialization
+// OPTIONS ===============================================================
+int debug = 1;
+int isInterrupt = 0; //set to 1 if wanting to use interrupts (NOT STABLE. code may crash)
+int Mode = 1; //Default mode is: Normal mode flag (other Modes are Agressive = 2 and Forced = 3)
 
 //================================\/ PID \/=============
 unsigned long lastTime = 0;
 double errSum = 0, lastErr = 0, error = 0, dErr = 0;
 double kp = 0.7, ki = 0.4 / 60000.0, kd = 0; //kp tunes to 1.3 alone
+
 //====================general variables==================================
-
-//VarSpeedServo myservo;  // create servo object to control a servo
-Servo myservo;  // create servo object to control a servo
-
 int raw = 1024; //sensor reads High (1024) when no drop
 volatile long count = 0;
 long lastDropCount = 0;
@@ -135,7 +141,6 @@ float High_LED = millis();
 float Servo_adjust = millis(); //servo adjustment time keeper
 String botLine = "";
 String topLine = "";
-int Mode = 1; //Default mode is: Normal mode flag (other Modes are Agressive = 2 and Forced = 3)
 double time_now = 0;
 bool isFirstConnect = true;
 int first_tune = 1;
@@ -143,13 +148,14 @@ bool shouldSaveConfig = false;
 float seconds, minutes, hours, days;
 unsigned long interrupt_time = millis();
 int tuned = 0;
-int debug = 0;
 int is_servo_min_tuned = 0;
 long servo_min_tune_time = millis();
 int is_close_success = 0;
 int close_factor = 15;
 int record_count = count;
-int isInterrupt = 0;
+int isDONE = 0;
+int isNearDrop = 0;
+int do_once = 0;
 
 // Time until sleep (in seconds):
 const int sleepTimeS = 0;
@@ -177,29 +183,23 @@ int closed_to_stop = 180; // forced mode servo value close_to_stop (this is the 
 int time_to_stay_closed = 200; //forced mode time_to_stay_open in milliseconds
 float hold_value = 0;
 
-// RUNNING AVERAGE VARIABLES =========================================
+// RUNNING AVERAGE SHORTER VARIABLES =========================================
 const int numReadings = 3;             // minimum 2
 double readings[numReadings];      // the readings from the analog input (subtract 1 since it starts at zero)
 double total = 0;                  // the running total
 int index_n = 0;                  // the index_n of the current reading
 int start_avg = 0;
-// RUNNING AVERAGE VARIABLES =========================================
+// RUNNING AVERAGE LONGER VARIABLES =========================================
 const int numReadings_avg = 10;             // minimum 2
 double readings_avg[numReadings_avg];      // the readings from the analog input (subtract 1 since it starts at zero)
 double total_avg = 0;                  // the running total
 int index_n_avg = 0;                  // the index_n of the current reading
 int start_avg_avg = 0;
-
 float DPM_avg = 0;
-//====================================================================
 
 // TUNING VARIABLES =================================================
 const int tuning_drops = 1; // how many drops before closing the servo a little in the tuning mode
-float add = 0;
-float DPM_tune_avg = 0;
-//====================================================================
 
-//=========================================================================BLYNK functions & Widgets=====
 
 void pause_requests() {
   while (pause == 1) {
@@ -208,7 +208,7 @@ void pause_requests() {
     }
 
     //if (Blynk.connected()) {
-      Blynk.run();
+    Blynk.run();
     //}
 
     thLCD.clear(); // Clear the LCD
@@ -284,7 +284,7 @@ BLYNK_WRITE(SERVO_SLIDER) { //is "Blynk Manual servo control" - INPUT
   while (millis() - slider_time < 5000) {
     pause_requests(); //accept pause requests
     //if (Blynk.connected()) {
-      Blynk.run();
+    Blynk.run();
     //}
   }
 }
@@ -333,6 +333,7 @@ void open_up() {
 }
 
 void tune() {
+  Blynk.run();
   if (debug >= 1) {
     Serial.println("tune()");
   }
@@ -343,37 +344,24 @@ void tune() {
     myservo.attach(ServoPIN);
     delay(15);
     myservo.write(Servo_Val);
-    Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
 
     for (int run_tune = 0; run_tune < tuning_drops; run_tune++) {
 
-      //reconnectBlynk();
-
       while (voltage > 0) {
-
+        Blynk.run();
         drop_no_interupt();
-
-        //if (Blynk.connected()) {
-        //  Blynk.run();
-        //}
-        
+        pause_requests();
         timer.run();
 
-        topLine = "Tuning Mode     "; //LCD title
-        UpTime();
-
-        if (first_tune == 1) {
+        if (first_tune == 1 && (millis() - servo_min_tune_time) > 1000) {
           Servo_Val -= 1;
           myservo.attach(ServoPIN);
-          delay(1000); //Keep this one slow otherwise it will open too quickly and you have too many drops
           myservo.write(Servo_Val);
-          Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
           open_to_drop = Servo_Val - 10;
           if (Servo_Val < servo_min) Servo_Val = servo_min;
           if (open_to_drop < servo_min) open_to_drop = servo_min;
+          servo_min_tune_time = millis();
         }
-
-        pause_requests();
 
         if (millis() - High_LED > 500) { // add LED indicator for tuning
           digitalWrite(LED_PIN, LOW);
@@ -401,16 +389,11 @@ void tune() {
 
       if (DPM_avg < 100 && is_servo_min_tuned == 0 && tuned != 1) { //not done yet .. need to fully open until 100-DPM to get servo_min value
 
-        //reconnectBlynk();
-
         while (DPM_avg < 100 || count < 20) {
-
-          //if (Blynk.connected()) {
-          //  Blynk.run();
-          //}
-          timer.run();
-
+          Blynk.run();
           drop_no_interupt();
+          pause_requests();
+          timer.run();
 
           if ((millis() - servo_min_tune_time) > 1000) {
             Servo_Val -= 1;
@@ -418,9 +401,7 @@ void tune() {
             myservo.attach(ServoPIN);
             delay(25); //Keep this one slow otherwise it will open too quickly and you have too many drops
             myservo.write(Servo_Val);
-            Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
             servo_min = Servo_Val;
-            Blynk.virtualWrite(SERVO_MIN_PIN, servo_min);
             servo_min_tune_time = millis();
           }
 
@@ -453,7 +434,6 @@ void tune() {
       if (DPM <= 6 && count > 10 && tuned != 1) { //if DPM less than of equal to 6 DPM. EXIT, this gives closed value by adding 10
         closed_to_stop = Servo_Val + 10;
         servo_max = Servo_Val + 5;
-        Blynk.virtualWrite(SERVO_MAX_PIN, servo_max);
         if (closed_to_stop > servo_max) {
           closed_to_stop = servo_max;
         }
@@ -615,26 +595,33 @@ void print_stats() {
       terminal.flush(); //good practice, otherwise it doesn't fully print until the next go around
     }
 
-    yield();
-    Blynk.virtualWrite(DPM_VIRTUAL_PIN, DPM);
-    Blynk.virtualWrite(DPM_avg_VIRTUAL_PIN, DPM_avg);
-    Blynk.virtualWrite(DPM_INSTANT_PIN, DPM_Instant);
-    Blynk.virtualWrite(DROP_COUNT_VIRTUAL_PIN, count);
-    Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
-    Blynk.virtualWrite(SETPOINT_DPM_VIRT_PIN, set_DPM);
-    Blynk.virtualWrite(SERVO_UPDATE_SPEED_VPIN, Servo_update_Speed);
+    if (tuned == 1 || DPM_avg < 20) {
+      yield();
+      Blynk.virtualWrite(DPM_VIRTUAL_PIN, DPM);
+      Blynk.virtualWrite(DPM_avg_VIRTUAL_PIN, DPM_avg);
+      Blynk.virtualWrite(DPM_INSTANT_PIN, DPM_Instant);
+      Blynk.virtualWrite(DROP_COUNT_VIRTUAL_PIN, count);
+      Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
+      Blynk.virtualWrite(SETPOINT_DPM_VIRT_PIN, set_DPM);
+      Blynk.virtualWrite(SERVO_UPDATE_SPEED_VPIN, Servo_update_Speed);
+      Blynk.virtualWrite(IS_DONE_VPIN, isDONE);
 
-    //use it either here or in the loop to print once per second ... Save about 100ms per sec if you use it here
-    //but you won't see the uptime update once per second ... which doesn't feel right
-    UpTime();
+      //use it either here or in the loop to print once per second ... Save about 100ms per sec if you use it here
+      //but you won't see the uptime update once per second ... which doesn't feel right
+      UpTime();
 
+      if (debug >= 1) {
+        Serial.print("print_stats(");
+        Serial.print("time it took to upload: ");
+        Serial.print(millis() - uptime);
+        Serial.print("-ms");
+        Serial.println(")");
+      }
+    }
 
-    if (debug >= 1) {
-      Serial.print("print_stats(");
-      Serial.print("time it took to upload: ");
-      Serial.print(millis() - uptime);
-      Serial.print("-ms");
-      Serial.println(")");
+    if(DPM_avg > 20 && do_once == 0){
+      do_once = 1;
+      thLCD.print(0, 1, "DPM HIGH appHOLD");
     }
   }
 }
@@ -689,6 +676,8 @@ void measure_DPM() {
   else {
     DPM_avg = total_avg / (index_n_avg + 1);
   }
+
+  isNearDrop = 0; // drop had droped. no longer near
 }
 
 void Servo_angle_method() { //(NORMAL & AGRESSIVE MODE) The servo angle is adjusted after every drop to maintain set_DPM
@@ -787,10 +776,10 @@ void Speed_to_open_method() { //(FORCED MODE) The speed at which the servo is op
 
     //Serial.print("Servo val: ");Serial.println(Servo_Val);
 
-    if(isInterrupt == 1){ //only do this if interrupts are on ... doesn't make sence without
+    if (isInterrupt == 1) { //only do this if interrupts are on ... doesn't make sence without
       record_count = count;
     }
-    
+
     while (myservo.read() < (servo_max - Servo_movements) && myservo.read() < 180) {
       myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
       if (Servo_update_Speed > (close_factor * 5)) {
@@ -807,7 +796,7 @@ void Speed_to_open_method() { //(FORCED MODE) The speed at which the servo is op
       }
     }
 
-    if(isInterrupt == 1){ //only do this if interrupts are on ... doesn't make sence without
+    if (isInterrupt == 1) { //only do this if interrupts are on ... doesn't make sence without
       if (count > record_count) {
         if (close_factor < 100) {
           close_factor += 1;
@@ -818,7 +807,7 @@ void Speed_to_open_method() { //(FORCED MODE) The speed at which the servo is op
       } else {
         is_close_success += 1;
       }
-      
+
       if (is_close_success > 10) {
         if (close_factor > 1) {
           close_factor -= 1;
@@ -877,7 +866,7 @@ void run_blynk() {
   }
   yield();
   //if (Blynk.connected()) {
-    Blynk.run();
+  Blynk.run();
   //}
 }
 
@@ -920,7 +909,7 @@ void saveConfigCallback () {
 }
 
 void UpTime() {
-  if ((millis() - uptime) > 1000) { //update uptime LCD & uptime variable
+  if ((millis() - uptime) > 1000 && isNearDrop == 0) { //update uptime LCD & uptime variable
     if (debug >= 1) {
       Serial.print("uptime: ");
       Serial.print(millis());
@@ -928,6 +917,7 @@ void UpTime() {
     }
     uptime = millis();
     Blynk.virtualWrite(UPTIME_VIRTUAL_PIN, (int)millis() / 1000); //print uptime in seconds, not ms
+    Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
     botLine = "";
     seconds = (float)millis() / 1000;
     minutes = seconds / 60;
@@ -1076,7 +1066,7 @@ void setup() {
 
   pinMode(photo_interuptor_PIN, INPUT);
 
-  if(isInterrupt == 1){
+  if (isInterrupt == 1) {
     attachInterrupt(digitalPinToInterrupt(photo_interuptor_PIN), drop_interrupt, FALLING); //possibly also Mode: LOW(no good),FALLING(best),CHANGE(too many),RISING(no)
   }
 
@@ -1121,7 +1111,16 @@ void setup() {
   timer.setInterval(10000L, open_up); // open up the servo every 30 seconds if no drops come ... not a Blynk update
 
   //reconnectBlynk();
+
+  while (!Blynk.connected()) {
+    //wait for connection
+    Blynk.run();
+  }
+
   tune(); //start by tuning the system
+
+  isDONE = 0;
+  Blynk.virtualWrite(IS_DONE_VPIN, isDONE);
 
   //these timers should run only after system is tuned (interferes with fast drop reading)
   timer.setInterval(500L, run_blynk);
@@ -1129,14 +1128,18 @@ void setup() {
 }//================================================================================END SETUP========================
 
 void loop() {
+
+  if ((millis() - lastDrop) > (0.90 * (60000.0 / set_DPM)) && isNearDrop == 0) {
+    isNearDrop = 1;
+    thLCD.print(15, 1, ".");
+  }
+
   if (debug >= 2) {
     Serial.println("loop()");
   }
 
   pause_requests(); //accept pause requests
-  //if (Blynk.connected()) {
-    Blynk.run();
-  //}
+  Blynk.run();
   timer.run(); // Initiates SimpleTimer
 
   digitalWrite(LED_PIN, HIGH); // for some odd reason ... LED PIN to "HIGH" means "off"
@@ -1159,7 +1162,7 @@ void loop() {
     Speed_to_open_method();
     if (Mode == 3) {
       //NOTE: can't show uptime on Forced Mode with intterrupts ... Too much servo interference.
-      if(isInterrupt == 0){
+      if (isInterrupt == 0) {
         UpTime(); //Uptime takes away about 100ms
       }
       topLine = "MODE: FoRcEd ;] ";
@@ -1216,34 +1219,24 @@ void loop() {
     thLCD.clear(); // Clear the LCD
     thLCD.print(0, 0, "Finished in:"); // Print top line
     thLCD.print(0, 1, botLine); // Print bottom line
+
     while (restart == 0)
     {
+      isDONE = 1;
       if ((millis() - last_interrupt_time) > 10000) { //needed otherwise it dowsn't show the finished on the LCD
         thLCD.print(0, 0, "Finished in:"); // Print top line
         thLCD.print(0, 1, botLine); // Print bottom line
         last_interrupt_time = millis();
+        Blynk.virtualWrite(IS_DONE_VPIN, isDONE);
       }
-      //if (Blynk.connected()) {
-        Blynk.run();
-      //}
+      Blynk.run();
       pause_requests(); //accept pause requests
-
-      if (!digitalRead(SleepPin)) {
-        myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-        delay(15);
-        myservo.write(servo_max);
-        Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
-        Serial.println("...Going to Sleep...");
-        delay(1000);
-        ESP.deepSleep(0, WAKE_RF_DEFAULT); // Sleep forever, until Pin#16 is un-grounded (button un-pushed)
-      }
-
     } // when finished do nothing but listen for Blynk app
-    myservo.attach(ServoPIN);
-    restart = 0;
-    lastDrop = millis();
-    Servo_Val = 140;
-    Serial.println(); Serial.print("Restarting"); delay(700); Serial.print(" ."); delay(700); Serial.print("."); delay(700); Serial.print("."); delay(10); Serial.println(" waiting for drops"); Serial.println();
+
+    Serial.println("Restarting DropBOB ... please wait");
+    delay(3000);
+    ESP.restart();
+    delay(5000);
   }
 }
 
@@ -1262,7 +1255,7 @@ void drop_interrupt() {
 }
 
 void drop_no_interupt() {
-  if(isInterrupt == 0){
+  if (isInterrupt == 0) {
     raw = analogRead(photo_interuptor_PIN); // read the drop sensor
     if (raw == 0 && (millis() - last_interrupt_drop) > 70) {
       voltage = 5.0 * raw / 1023; // convert it to voltage
