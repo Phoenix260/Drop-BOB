@@ -198,7 +198,7 @@ int start_avg_avg = 0;
 float DPM_avg = 0;
 
 // TUNING VARIABLES =================================================
-const int tuning_drops = 1; // how many drops before closing the servo a little in the tuning mode
+const int tuning_drops = 3; // how many drops before closing the servo a little in the tuning mode
 
 
 void pause_requests() {
@@ -310,7 +310,12 @@ void open_up() {
     Servo_Val = Servo_Val - open_factor * (set_DPM - temp_DPM); // if the servo closed and no drops are comming for too long open it up a little.
 
     if (Servo_Val < servo_min) {
-      Servo_Val = servo_min;
+      if ((millis() - lastDrop) > (5 * open_delay * (60000.0 / set_DPM)) && (tuned == 1)){ //if no drops for 5x wait time, change min val
+        servo_min--;
+        Servo_Val--;
+      }
+      if(Servo_Val < 0){Servo_Val = 0;}
+      if(servo_min < 0){servo_min = 0;}
     }
 
     myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
@@ -318,17 +323,28 @@ void open_up() {
     myservo.write(Servo_Val);
     Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
   }
-  if ((millis() - lastDrop) > (10 * (60000.0 / set_DPM)) && (tuned == 0)) {
+  
+  if ((millis() - lastDrop) > (10 * (60000.0 / set_DPM)) && (tuned == 0)) { // stricktly for tuning mode to stop in too closed
     if (debug >= 1) {
       Serial.println("open_up() - *** END TUNE ***");
     }
-    closed_to_stop = Servo_Val + 10;
-    servo_max = Servo_Val + 25;
-    Blynk.virtualWrite(SERVO_MAX_PIN, servo_max);
-    if (closed_to_stop > servo_max) {
-      closed_to_stop = servo_max;
+    closed_to_stop = Servo_Val + 3;
+    servo_max = Servo_Val + 5;
+    if (closed_to_stop > 180) {
+      closed_to_stop = 180;
     }
+    if (servo_max > 180) {
+      servo_max = 180;
+    }
+    Blynk.virtualWrite(SERVO_MAX_PIN, servo_max);
+    Blynk.virtualWrite(SERVO_MIN_PIN, servo_min);
     tuned = 1;
+    if (Servo_Val < servo_min) {
+      Servo_Val = servo_min;
+    }
+    if (Servo_Val > servo_max) {
+      Servo_Val = servo_max;
+    }
   }
 }
 
@@ -387,7 +403,7 @@ void tune() {
         print_stats();
       }
 
-      if (DPM_avg < 100 && is_servo_min_tuned == 0 && tuned != 1) { //not done yet .. need to fully open until 100-DPM to get servo_min value
+      if (DPM_avg < 100 && is_servo_min_tuned == 0 && tuned == 0) { //not done yet .. need to fully open until 100-DPM to get servo_min value
 
         while (DPM_avg < 100 || count < 20) {
           Blynk.run();
@@ -417,13 +433,13 @@ void tune() {
         }
 
       }
-      else if (DPM_avg > 100 && is_servo_min_tuned == 0 && tuned != 1) {
+      else if (DPM_avg > 100 && is_servo_min_tuned == 0 && tuned == 0) {
         is_servo_min_tuned = 1; //only need to do this once
       }
 
       if (DPM <= 6 && count > 10 && tuned != 1) { //if DPM less than of equal to 6 DPM. EXIT, this gives closed value by adding 10
-        closed_to_stop = Servo_Val + 5;
-        servo_max = Servo_Val + 10;
+        closed_to_stop = Servo_Val + 3;
+        servo_max = Servo_Val + 5;
         if (closed_to_stop > 180) {
           closed_to_stop = 180;
         }
@@ -466,7 +482,6 @@ BLYNK_WRITE(MODE_DROPDOWN) { //Dropdown selection of MODE - INPUT
   if (param.asInt() == 1) {
     Mode = 1; //Normal mode flag
     kp = 0.7, ki = 0.4 / 60000.0, kd = 0; //std PI(D)
-    servo_min = 0; servo_max = 180; //std constraints
     Servo_update_Speed = 500; //std movement
     open_factor = 0.5; //std open factor
     kick = 0; // no kick
@@ -474,7 +489,6 @@ BLYNK_WRITE(MODE_DROPDOWN) { //Dropdown selection of MODE - INPUT
     DPM_buffer = 0.5; // 1-DPM buffer
     open_bias = 0.8; // no open bias (0 to 1) ... 1 is no bias, 0 is the valve never opens if too closed (good for keeping the valve biased towards les DPM
     open_delay = 1.25; // back to normal tollerance
-    topLine = "MODE: Normal :) ";
     Servo_movements = 1;      // how much to update servo position by
   }
   if (param.asInt() == 2) {
@@ -487,7 +501,6 @@ BLYNK_WRITE(MODE_DROPDOWN) { //Dropdown selection of MODE - INPUT
     DPM_buffer = 0; // no buffer, always update
     open_bias = 1; // open half as fast as you close
     open_delay = 1.5; // add some opening tollerance
-    topLine = "MODE: AGRESSIVE!";
     Servo_movements = 1;      // how much to update servo position by
   }
   if (param.asInt() == 3) {
@@ -495,7 +508,6 @@ BLYNK_WRITE(MODE_DROPDOWN) { //Dropdown selection of MODE - INPUT
     kp = 0.9, ki = 0.1 / 60000.0, kd = 700; //std PI(D)
     time_to_stay_closed = 100; //in milliseconds
     open_delay = 5; //let it go up to 5x off course before correcting
-    topLine = "MODE: FoRcEd ;] ";
     Servo_movements = 1;      // how much to update servo position by
     DPM_buffer = 0.25;
   }
@@ -684,11 +696,12 @@ void Servo_angle_method() { //(NORMAL & AGRESSIVE MODE) The servo angle is adjus
       Serial.println("Servo_angle_method()");
     }
 
-    if (Servo_Val >= servo_max) {
+    if (Servo_Val >= servo_max) { //if drops still keep coming after servo max, increase max
       servo_max++;
       if (servo_max > 180) {
         servo_max = 180;
       }
+      Blynk.virtualWrite(SERVO_MAX_PIN, servo_max);
     }
 
     state = LOW;
@@ -951,10 +964,6 @@ void setup() {
   //read configuration from FS json
   Serial.println("mounting FS...");
 
-  thLCD.clear(); // Clear the LCD
-  thLCD.print(0, 0, "Starting up ... "); // Print top line
-  thLCD.print(0, 1, "TuningMode(5min)"); // Print bottom line
-
   if (SPIFFS.begin()) {
     Serial.println("mounted file system");
     if (SPIFFS.exists("/config.json")) {
@@ -1112,10 +1121,14 @@ void setup() {
     Blynk.run();
   }
 
-  tune(); //start by tuning the system
+  thLCD.clear(); // Clear the LCD
+  thLCD.print(0, 0, "TuningMode(5min)"); // Print top line
+  thLCD.print(0, 1, "please wait ... "); // Print bottom line
 
   isDONE = 0;
   Blynk.virtualWrite(IS_DONE_VPIN, isDONE);
+  
+  tune(); //start by tuning the system, No blynk update during tuning mode
 
   //these timers should run only after system is tuned (interferes with fast drop reading)
   timer.setInterval(500L, run_blynk);
