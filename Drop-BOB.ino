@@ -647,9 +647,9 @@ void print_stats() {
   if (DPM < 1000) {
     Serial.print(count);
     Serial.print("\t");
-    if (DPM_Instant >= 100){
+    if (DPM_Instant >= 99.5){ //otherwise the printFloat will round it to 10 and also display 2 decimals
       printFloat(DPM_Instant,0); Serial.print(". -"); Serial.print("DPMi");
-    } else if(DPM_Instant < 10){
+    } else if(DPM_Instant < 9.995){ //otherwise the printFloat will round it to 10 and also display 2 decimals
       printFloat(DPM_Instant,2); Serial.print(" -"); Serial.print("DPMi");
     } else {
       printFloat(DPM_Instant,1); Serial.print(" -"); Serial.print("DPMi");
@@ -658,9 +658,9 @@ void print_stats() {
       Serial.print("*");
     }
     Serial.print("\t");
-    if (DPM >= 100){
+    if (DPM >= 99.5){ //otherwise the printFloat will round it to 10 and also display 2 decimals
       printFloat(DPM,0); Serial.print(". -"); Serial.print("dpm3");
-    } else if (DPM < 10){
+    } else if (DPM < 9.995){ //otherwise the printFloat will round it to 10 and also display 2 decimals
       printFloat(DPM,2); Serial.print(" -"); Serial.print("dpm3");
     } else {
       printFloat(DPM,1); Serial.print(" -"); Serial.print("dpm3");
@@ -669,9 +669,9 @@ void print_stats() {
       Serial.print("*");
     }
     Serial.print("\t");
-    if (DPM_avg >= 100){
+    if (DPM_avg >= 99.5){ //otherwise the printFloat will round it to 10 and also display 2 decimals
       printFloat(DPM_avg,0); Serial.print(". -"); Serial.print("dpm10");
-    } else if (DPM_avg < 10){
+    } else if (DPM_avg < 9.995){ //otherwise the printFloat will round it to 10 and also display 2 decimals
       printFloat(DPM_avg,2); Serial.print(" -"); Serial.print("dpm10");
     } else {
       printFloat(DPM_avg,1); Serial.print(" -"); Serial.print("dpm10");
@@ -680,9 +680,9 @@ void print_stats() {
       Serial.print("*");
     }
     Serial.print("\t");
-    if(alltimeAVG_DPM >= 100){
+    if(alltimeAVG_DPM >= 99.5){ //otherwise the printFloat will round it to 10 and also display 2 decimals
       printFloat(alltimeAVG_DPM,0); Serial.print(". -"); Serial.print("dpmALL");
-    } else if (alltimeAVG_DPM < 10){
+    } else if (alltimeAVG_DPM < 9.995){ //otherwise the printFloat will round it to 10 and also display 2 decimals
       printFloat(alltimeAVG_DPM,2); Serial.print(" -"); Serial.print("dpmALL");
     } else {
       printFloat(alltimeAVG_DPM,1); Serial.print(" -"); Serial.print("dpmALL");
@@ -697,7 +697,7 @@ void print_stats() {
       Serial.print("->");
       printFloat(Servo_Val,0);
       Serial.print(" -");
-      Serial.print("Ser_Ang ");
+      Serial.print("Ang");
       if (tuned == 0) {
         Serial.println();
       }
@@ -863,9 +863,9 @@ void Servo_angle_method() { //(NORMAL & AGRESSIVE MODE) The servo angle is adjus
     dErr = (error - lastErr) / delta;
 
     if ( abs(myservo.read() - Servo_Val) <= Servo_movements) { //only change servo value if reached new angle
-      if ( (DPM_avg - set_DPM) > DPM_buffer && first_drop == 0) { //to add forward or reverse bias Uncomment the elseif loop and the DPM condition
+      if ( (DPM - set_DPM) > DPM_buffer && first_drop == 0) { //to add forward or reverse bias Uncomment the elseif loop and the DPM condition
         
-        if (abs( kp * error + ki * errSum + kd * dErr) <= 1 || DPM_avg >= ((2)*set_DPM)) {
+        if (abs( kp * error + ki * errSum + kd * dErr) <= 5 || DPM >= ((2)*set_DPM)) {
           Servo_Val = Servo_Val - ( kp * error + ki * errSum + kd * dErr); // Set servo change depending on how far away from set_DPM you are at
         } else {
           Servo_Val++; //if only small movements needed, one tick at a time
@@ -891,9 +891,7 @@ void Servo_angle_method() { //(NORMAL & AGRESSIVE MODE) The servo angle is adjus
             delay(kick_close_delay);
             if (debug >= 1) {
               Serial.println();
-              Serial.println("kick(CLOSING):");
-              Serial.println(DPM_avg);
-              Serial.println(kick_close);
+              Serial.print("kick(CLOSING):");
               Serial.println(DPM_avg * kick_close);
               Serial.println();
             }
@@ -901,9 +899,9 @@ void Servo_angle_method() { //(NORMAL & AGRESSIVE MODE) The servo angle is adjus
           myservo.write(Servo_Val);
           Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
         }
-      } else if ( (DPM_avg - set_DPM) < -DPM_buffer && first_drop == 0) { // This is to give a Forward or Reverse BIAS (commented out)
+      } else if ( (DPM - set_DPM) < -DPM_buffer && first_drop == 0) { // This is to give a Forward or Reverse BIAS (commented out)
         
-        if (abs( kp * error + ki * errSum + kd * dErr) <= 1 || DPM_avg <= ((0.5)*set_DPM)) {
+        if (abs( kp * error + ki * errSum + kd * dErr) <= 5 || DPM <= ((0.5)*set_DPM)) {
           Servo_Val = Servo_Val - open_bias * (kp * error + ki * errSum + kd * dErr); // Set servo change depending on how far away from set_DPM you are at
         } else {
           Servo_Val--; //if only small movements needed, one tick at a time
@@ -929,9 +927,7 @@ void Servo_angle_method() { //(NORMAL & AGRESSIVE MODE) The servo angle is adjus
             delay(kick_close_delay);
             if (debug >= 1) {
               Serial.println();
-              Serial.println("kick(Opening)");
-              Serial.println(DPM_avg);
-              Serial.println(kick_close);
+              Serial.print("kick(Opening)");
               Serial.println(DPM_avg * kick_open);
               Serial.println();
             }
@@ -1473,7 +1469,7 @@ void loop() {
 
     while (restart == 0)
     {
-      isDONE = 1;
+      isDONE = 1023;
       if ((millis() - last_interrupt_time) > 10000) { //needed otherwise it dowsn't show the finished on the LCD
         thLCD.print(0, 0, "Finished in:"); // Print top line
         thLCD.print(0, 1, botLine); // Print bottom line
