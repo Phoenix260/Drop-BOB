@@ -68,6 +68,8 @@
 #define SERVO_UPDATE_SPEED_VPIN V20
 #define CLEAR_SAVED_SETTINGS    V21
 #define IS_DONE_VPIN            V22
+#define BOTTLE_SELECT_PIN       V23
+#define ALLTIME_DROP_AVG_PIN    V24
 
 /////////////////////////////////////////
 // Hardware Definitions                //
@@ -106,10 +108,11 @@ SimpleTimer     timer;
 // User values ==========================================================
 char blynk_token[33]; //"Token to be entered in browser";
 
-// OPTIONS ===============================================================
-int debug = 1;
-int isInterrupt = 0; //set to 1 if wanting to use interrupts (NOT STABLE. code may crash)
-int Mode = 1; //Default mode is: Normal mode flag (other Modes are Agressive = 2 and Forced = 3)
+// Default OPTIONS ===============================================================
+int debug = 0;          //Default mode: 0 none, 1 regular, 2 verbose
+int isInterrupt = 0;    //set to 1 if wanting to use interrupts (NOT STABLE. code may crash)
+int Mode = 2;           //Default mode: Normal=1, Agressive = 2, Forced = 3
+int bottle_size = 300;  //Default mode: small=300, medium=500, large=1000
 
 //================================\/ PID \/=============
 unsigned long lastTime = 0;
@@ -139,8 +142,6 @@ int update_Sync = 0;
 float Low_LED = millis();
 float High_LED = millis();
 float Servo_adjust = millis(); //servo adjustment time keeper
-String botLine = "";
-String topLine = "";
 double time_now = 0;
 bool isFirstConnect = true;
 int first_tune = 1;
@@ -152,10 +153,12 @@ int is_servo_min_tuned = 0;
 long servo_min_tune_time = millis();
 int is_close_success = 0;
 int close_factor = 15;
-int record_count = count;
 int isDONE = 0;
 int isNearDrop = 0;
 int do_once = 0;
+float ml_per_drop = 0.05; // should be stored in memory to increase precision per run
+int total_time = 0;
+int record_count = 0;
 
 // Time until sleep (in seconds):
 const int sleepTimeS = 0;
@@ -166,14 +169,15 @@ long sync_time = 0;
 
 // SERVO SETUP VALUES ======================================================
 float set_DPM = 6;
-int Servo_Val = 100; // starting servo value (0 is full open 180 is full close)
+float Servo_Val = 100; // starting servo value (0 is full open 180 is full close)
 int servo_min = 0;
 int servo_max = 180; //Servo won't go higher than 180, you can check with "myservo.read()"
 int Servo_update_Speed = 500; // update every X milliseconds
 int Servo_movements = 1;      // how much to update servo position by
 float open_factor = 0.5;
-int kick = 0; //This makes the servo kick to remouve play in system (***LOUDER)
-int kick_delay = 0; // delay to wait after the kick before going to true value
+float kick_close = 0; //This makes the servo kick_close to remouve play in system (***LOUDER)
+float kick_open = 0;
+int kick_close_delay = 0; // delay to wait after the kick_close before going to true value
 float DPM_buffer = 1; // leave the servo alone if DPM withing the buffer (abs() + or - DPM_buffer)
 float DPM_compare = DPM; //this lets the agressive mode use instantaneous DPM, and regular mode use DPM_avg
 float open_bias = 1; // no open or close bias for the valve with 1x
@@ -182,6 +186,11 @@ int open_to_drop = 100; // forced mode servo value open_to_drop (this is the def
 int closed_to_stop = 180; // forced mode servo value close_to_stop (this is the default ... It get overwriten with Tune function)
 int time_to_stay_closed = 200; //forced mode time_to_stay_open in milliseconds
 float hold_value = 0;
+int sync_once_aft_tune = 0;
+int kick_close_tuned = 0;
+int kick_open_tuned = 0;
+int temp = 0;
+float alltimeAVG_DPM = 0;
 
 // RUNNING AVERAGE SHORTER VARIABLES =========================================
 const int numReadings = 3;             // minimum 2
@@ -198,7 +207,21 @@ int start_avg_avg = 0;
 float DPM_avg = 0;
 
 // TUNING VARIABLES =================================================
-const int tuning_drops = 3; // how many drops before closing the servo a little in the tuning mode
+int tuning_drops = 3; // how many drops before closing the servo a little in the tuning mode
+int max_DPM_to_tune = 30; //how high to get DPM to consider full open
+
+// LCD Text =========================================================
+// note that the LCD has 2 lines and 16 characters per line max use space wisely
+String mode2 = "Standard"; //8 char show at LCD position 10
+String mode1 = "Passive "; //8 char show at LCD position 10
+String mode3 = "FoRcEd  "; //8 char show at LCD position 10
+
+String eta = "eta:"; //4 char
+
+String DropNEAR = ".drop"; //character indicating that drop is near ... so you know why display not updating
+
+String botLine = ""; //empty strings used to compose the LCD - size 17 since you need space for the "\0" null char
+String topLine = ""; //empty strings used to compose the LCD - size 17 since you need space for the "\0" null char
 
 
 void pause_requests() {
@@ -257,6 +280,7 @@ BLYNK_WRITE(DropBOB_DEBUG) {
 
 BLYNK_WRITE(DPM_SLIDER) { //"Blynk slider for DPM setting" - INPUT
   set_DPM = param[0].asInt();
+  total_time = bottle_size / ml_per_drop / set_DPM / 60; //in hours
 }
 
 BLYNK_WRITE(RESTART_BTN) { //is "Blynk restart button" - INPUT
@@ -310,12 +334,16 @@ void open_up() {
     Servo_Val = Servo_Val - open_factor * (set_DPM - temp_DPM); // if the servo closed and no drops are comming for too long open it up a little.
 
     if (Servo_Val < servo_min) {
-      if ((millis() - lastDrop) > (5 * open_delay * (60000.0 / set_DPM)) && (tuned == 1)){ //if no drops for 5x wait time, change min val
+      if ((millis() - lastDrop) > (5 * open_delay * (60000.0 / set_DPM)) && (tuned == 1)) { //if no drops for 5x wait time, change min val
         servo_min--;
         Servo_Val--;
       }
-      if(Servo_Val < 0){Servo_Val = 0;}
-      if(servo_min < 0){servo_min = 0;}
+      if (Servo_Val < 0) {
+        Servo_Val = 0;
+      }
+      if (servo_min < 0) {
+        servo_min = 0;
+      }
     }
 
     myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
@@ -323,7 +351,7 @@ void open_up() {
     myservo.write(Servo_Val);
     Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
   }
-  
+
   if ((millis() - lastDrop) > (10 * (60000.0 / set_DPM)) && (tuned == 0)) { // stricktly for tuning mode to stop in too closed
     if (debug >= 1) {
       Serial.println("open_up() - *** END TUNE ***");
@@ -348,12 +376,25 @@ void open_up() {
   }
 }
 
+void blue_LED_blink_on_off(){
+  if (millis() - High_LED > 250) { // add LED indicator for tuning
+    digitalWrite(LED_PIN, LOW);
+    Low_LED = millis();
+    High_LED = INFINITY;
+  }
+  if (millis() - Low_LED > 250) { // add LED indicator for tuning
+    digitalWrite(LED_PIN, HIGH);
+    High_LED = millis();
+    Low_LED = INFINITY;
+  }
+}
+
 void tune() {
   Blynk.run();
   if (debug >= 1) {
     Serial.println("tune()");
   }
-  
+
   tuned = 0;
   for (/*nothing needed here*/; Servo_Val < servo_max; Servo_Val++) {
 
@@ -379,23 +420,14 @@ void tune() {
           servo_min_tune_time = millis();
         }
 
-        if (millis() - High_LED > 500) { // add LED indicator for tuning
-          digitalWrite(LED_PIN, LOW);
-          Low_LED = millis();
-          High_LED = INFINITY;
-        }
-        if (millis() - Low_LED > 500) { // add LED indicator for tuning
-          digitalWrite(LED_PIN, HIGH);
-          High_LED = millis();
-          Low_LED = INFINITY;
-        }
+        blue_LED_blink_on_off();
 
         if (tuned == 1) {
           break;
         }
       }
 
-      if (tuned != 1) {
+      if (tuned == 0) {
         voltage = 5.0;
         first_tune = 0;
 
@@ -403,9 +435,9 @@ void tune() {
         print_stats();
       }
 
-      if (DPM_avg < 100 && is_servo_min_tuned == 0 && tuned == 0) { //not done yet .. need to fully open until 100-DPM to get servo_min value
+      if (DPM_avg < max_DPM_to_tune && is_servo_min_tuned == 0 && tuned == 0) { //not done yet .. need to fully open until 100-DPM to get servo_min value
 
-        while (DPM_avg < 100 || count < 20) {
+        while (DPM_avg < max_DPM_to_tune || count < 20) {
           Blynk.run();
           drop_no_interupt();
           pause_requests();
@@ -432,12 +464,22 @@ void tune() {
           }
         }
 
-      }
-      else if (DPM_avg > 100 && is_servo_min_tuned == 0 && tuned == 0) {
-        is_servo_min_tuned = 1; //only need to do this once
+      } else if (DPM_avg > max_DPM_to_tune && is_servo_min_tuned == 0 && tuned == 0) {
+        Serial.println();Serial.print("minimum servo value: ");Serial.println(servo_min);Serial.println();
+        is_servo_min_tuned = 1;
+        temp = tuning_drops; // hold value until the next block
+        tuning_drops = 1; //minimize the drops after MAX-DPM back until to MAX-DPM
       }
 
-      if (DPM <= 6 && count > 10 && tuned != 1) { //if DPM less than of equal to 6 DPM. EXIT, this gives closed value by adding 10
+      if (DPM_avg < max_DPM_to_tune && kick_close_tuned == 0) {
+        kick_close = (Servo_Val - servo_min) / max_DPM_to_tune; //this is the factor of % of DPM to kick_close
+        Serial.println();Serial.print("the Closed slack is: ");Serial.print(kick_close);Serial.println(" xDPM");Serial.println();
+        kick_close_tuned = 1;
+        tuning_drops = temp; // restore value
+      }
+
+      if (DPM <= set_DPM && count > 10 && tuned == 0 && is_servo_min_tuned == 1) { //if DPM less than of equal to 6 DPM. EXIT, this gives closed value by adding 10
+
         closed_to_stop = Servo_Val + 3;
         servo_max = Servo_Val + 5;
         if (closed_to_stop > 180) {
@@ -446,9 +488,55 @@ void tune() {
         if (servo_max > 180) {
           servo_max = 180;
         }
+
+        Serial.println();Serial.print("MAXIMUIM servo value: ");Serial.println(servo_max);
+        Serial.print("Closed to stop servo value: ");Serial.println(closed_to_stop);Serial.println();
+
+        while (DPM <= set_DPM) { //open back up to find the open slack
+          Blynk.run();
+          drop_no_interupt();
+          pause_requests();
+          timer.run();
+
+          blue_LED_blink_on_off();
+
+          if ((count - record_count) >= tuning_drops) {
+            Servo_Val -= 1;
+            if (Servo_Val < 0){ Servo_Val = 0;}
+            myservo.attach(ServoPIN);
+            delay(15);
+            myservo.write(Servo_Val);
+            record_count = count;
+
+            Blynk.syncVirtual(MODE_DROPDOWN); //sync Mode from last setting on APP
+            Blynk.syncVirtual(DPM_SLIDER); //sync setDPM from last setting on APP
+            Blynk.syncVirtual(DropBOB_DEBUG); //sync Debug Button from last setting on APP
+            Blynk.syncVirtual(BOTTLE_SELECT_PIN); //sync bottle size from last selection on APP
+            sync_once_aft_tune++; //keep track number of times, so If greater than 10, don't do more in reconnectBlynk()
+            
+          }
+
+          if (voltage == 0) {
+            measure_DPM();
+            print_stats();
+            voltage = 5.0;
+          }
+
+          if (tuned == 1) {
+            break;
+          }
+        }
+
+        if (DPM > set_DPM && kick_open_tuned == 0) {
+          kick_open = ((closed_to_stop + 3) - Servo_Val) / set_DPM; //this is the factor of % of DPM to kick_close
+          Serial.println();Serial.print("the Open slack is: ");Serial.print(kick_open);Serial.println(" xDPM");Serial.println();
+          kick_open_tuned = 1;
+        }
+
+        tuned = 1;
         Blynk.virtualWrite(SERVO_MAX_PIN, servo_max);
         Blynk.virtualWrite(SERVO_MIN_PIN, servo_min);
-        tuned = 1;
+        
         if (Servo_Val < servo_min) {
           Servo_Val = servo_min;
         }
@@ -484,20 +572,19 @@ BLYNK_WRITE(MODE_DROPDOWN) { //Dropdown selection of MODE - INPUT
     kp = 0.7, ki = 0.4 / 60000.0, kd = 0; //std PI(D)
     Servo_update_Speed = 500; //std movement
     open_factor = 0.5; //std open factor
-    kick = 0; // no kick
-    kick_delay = 0; // no kick delay
+    kick_close = 0; // no kick_close
+    kick_close_delay = 0; // no kick_close delay
     DPM_buffer = 0.5; // 1-DPM buffer
     open_bias = 0.8; // no open bias (0 to 1) ... 1 is no bias, 0 is the valve never opens if too closed (good for keeping the valve biased towards les DPM
     open_delay = 1.25; // back to normal tollerance
     Servo_movements = 1;      // how much to update servo position by
   }
   if (param.asInt() == 2) {
-    Mode = 2; //Agressive mode flag
-    kp = 0.6, ki = 0.3 / 60000.0, kd = 700; //derivative term predicts output bu more jitter
+    Mode = 2; //Standard mode flag
+    kp = 0.6, ki = 0.2 / 60000.0, kd = 900; //derivative term predicts output bu more jitter
     Servo_update_Speed = 1000; //reduce the movement speed (mostly when opening up)
     open_factor = 0.25; //let the system equalize longer by halfing the opening up factor.
-    kick = 30; // add 40 degrees of kick
-    kick_delay = 200; // wait 200 milliseconds before returning
+    kick_close_delay = 200; // wait 200 milliseconds before returning
     DPM_buffer = 0; // no buffer, always update
     open_bias = 1; // open half as fast as you close
     open_delay = 1.5; // add some opening tollerance
@@ -531,6 +618,24 @@ BLYNK_WRITE(MENU_DROPDOWN) { //Menu dropdown
   if (param.asInt() == 4) {//SIMULATE DROP
     voltage = 0;
   }
+}
+
+BLYNK_WRITE(BOTTLE_SELECT_PIN) { //Menu SELECT BOTTLE size
+  if (param.asInt() == 1) { // Small 300ml
+    //per google 1 drop has 0.05ml (use this as baseline, should be updated each full run)
+    bottle_size = 300;
+    total_time = round(float(bottle_size) / float(ml_per_drop) / float(set_DPM) / 60.0); //in hours
+  }
+  if (param.asInt() == 2) { //Medium 500ml
+    //per google 1 drop has 0.05ml (use this as baseline, should be updated each full run)
+    bottle_size = 500;
+    total_time = round(float(bottle_size) / float(ml_per_drop) / float(set_DPM) / 60.0); //in hours
+  }
+  if (param.asInt() == 3) { //Large 1L
+    //per google 1 drop has 0.05ml (use this as baseline, should be updated each full run)
+    bottle_size = 1000;
+    total_time = round(float(bottle_size) / float(ml_per_drop) / float(set_DPM) / 60.0); //in hours
+  }
 
 }
 
@@ -538,22 +643,61 @@ void print_stats() {
   if (debug >= 1) {
     Serial.println("print_stats()");
   }
+  
   if (DPM < 1000) {
     Serial.print(count);
     Serial.print("\t");
-    Serial.print(DPM_Instant); Serial.print(" -"); Serial.print("DPM-i");
+    if (DPM_Instant >= 100){
+      printFloat(DPM_Instant,0); Serial.print(". -"); Serial.print("DPMi");
+    } else if(DPM_Instant < 10){
+      printFloat(DPM_Instant,2); Serial.print(" -"); Serial.print("DPMi");
+    } else {
+      printFloat(DPM_Instant,1); Serial.print(" -"); Serial.print("DPMi");
+    }
+    if(abs(DPM_Instant - set_DPM) > (set_DPM/2)){
+      Serial.print("*");
+    }
     Serial.print("\t");
-    Serial.print(DPM); Serial.print(" -"); Serial.print("dpm3");
+    if (DPM >= 100){
+      printFloat(DPM,0); Serial.print(". -"); Serial.print("dpm3");
+    } else if (DPM < 10){
+      printFloat(DPM,2); Serial.print(" -"); Serial.print("dpm3");
+    } else {
+      printFloat(DPM,1); Serial.print(" -"); Serial.print("dpm3");
+    }
+    if(abs(DPM - set_DPM) > (set_DPM/2)){
+      Serial.print("*");
+    }
     Serial.print("\t");
-    Serial.print(DPM_avg); Serial.print(" -"); Serial.print("dpm10");
+    if (DPM_avg >= 100){
+      printFloat(DPM_avg,0); Serial.print(". -"); Serial.print("dpm10");
+    } else if (DPM_avg < 10){
+      printFloat(DPM_avg,2); Serial.print(" -"); Serial.print("dpm10");
+    } else {
+      printFloat(DPM_avg,1); Serial.print(" -"); Serial.print("dpm10");
+    }
+    if(abs(DPM_avg - set_DPM) > (set_DPM/2)){
+      Serial.print("*");
+    }
+    Serial.print("\t");
+    if(alltimeAVG_DPM >= 100){
+      printFloat(alltimeAVG_DPM,0); Serial.print(". -"); Serial.print("dpmALL");
+    } else if (alltimeAVG_DPM < 10){
+      printFloat(alltimeAVG_DPM,2); Serial.print(" -"); Serial.print("dpmALL");
+    } else {
+      printFloat(alltimeAVG_DPM,1); Serial.print(" -"); Serial.print("dpmALL");
+    }
+    
     Serial.print("\t");
     Serial.print(set_DPM); Serial.print(" -"); Serial.print("SetDPM");
     Serial.print("\t");
 
     if ( Mode == 1 || Mode == 2 || tuned == 0 ) {
       Serial.print(myservo.read());
+      Serial.print("->");
+      printFloat(Servo_Val,0);
       Serial.print(" -");
-      Serial.print("Servo_Angle  ");
+      Serial.print("Ser_Ang ");
       if (tuned == 0) {
         Serial.println();
       }
@@ -565,30 +709,30 @@ void print_stats() {
       Serial.print("/");
       Serial.print(close_factor);
       Serial.print(" -");
-      Serial.print("u_Spd/move/cls_f");
+      Serial.print("u_Spd/mov/clos");
     }
     if (tuned == 1) {
       Serial.print("\t");
       if (error > 0) {
         Serial.print(" "); //to line up with negatives
       }
-      Serial.print(kp * error); Serial.print("'"); Serial.print("P");
+      printFloat(kp * error,1); Serial.print("'"); Serial.print("P");
       Serial.print("  ");
       if (errSum > 0) {
         Serial.print(" "); //to line up with negatives
       }
-      Serial.print(ki * errSum); Serial.print("'"); Serial.print("I");
+      printFloat(ki * errSum,1); Serial.print("'"); Serial.print("I");
       Serial.print("  ");
       if (dErr > 0) {
         Serial.print(" "); //to line up with negatives
       }
-      Serial.print(kd * dErr); Serial.print("'"); Serial.println("D");
+      printFloat(kd * dErr,1); Serial.print("'"); Serial.println("D");
     }
 
     //Print to terminal all the less important stats needed for Debugging
     if (debug >= 1) {
       if ( Mode == 1 || Mode == 2 || tuned == 0 ) {
-        terminal.print(myservo.read()); terminal.print("svr_ang ");
+        terminal.print(myservo.read()); terminal.print("->"); terminal.print(Servo_Val); terminal.print("svr_ang ");
         if (tuned == 0) {
           terminal.println();
         }
@@ -612,6 +756,8 @@ void print_stats() {
       Blynk.virtualWrite(SETPOINT_DPM_VIRT_PIN, set_DPM);
       Blynk.virtualWrite(SERVO_UPDATE_SPEED_VPIN, Servo_update_Speed);
       Blynk.virtualWrite(IS_DONE_VPIN, isDONE);
+      
+      Blynk.virtualWrite(ALLTIME_DROP_AVG_PIN, alltimeAVG_DPM);
 
       //use it either here or in the loop to print once per second ... Save about 100ms per sec if you use it here
       //but you won't see the uptime update once per second ... which doesn't feel right
@@ -626,7 +772,7 @@ void print_stats() {
       }
     }
 
-    if(DPM_avg > 20 && do_once == 0){
+    if (DPM_avg > 20 && do_once == 0) {
       do_once = 1;
       thLCD.print(0, 1, "DPM HIGH appHOLD");
     }
@@ -683,7 +829,9 @@ void measure_DPM() {
   else {
     DPM_avg = total_avg / (index_n_avg + 1);
   }
-
+  
+  alltimeAVG_DPM = float(count)/(float(millis())/float(60000.0));
+  
   isNearDrop = 0; // drop had droped. no longer near
 }
 
@@ -694,6 +842,7 @@ void Servo_angle_method() { //(NORMAL & AGRESSIVE MODE) The servo angle is adjus
   if (voltage == 0 && state == HIGH) {
     if (debug >= 1) {
       Serial.println("Servo_angle_method()");
+      Serial.print("###old servo value:"); Serial.println(Servo_Val);
     }
 
     if (Servo_Val >= servo_max) { //if drops still keep coming after servo max, increase max
@@ -713,37 +862,88 @@ void Servo_angle_method() { //(NORMAL & AGRESSIVE MODE) The servo angle is adjus
     errSum += (error * delta);
     dErr = (error - lastErr) / delta;
 
-    if ( (DPM_avg - set_DPM) > DPM_buffer && first_drop == 0) { //to add forward or reverse bias Uncomment the elseif loop and the DPM condition
-      Servo_Val = Servo_Val - ( kp * error + ki * errSum + kd * dErr); // Set servo change depending on how far away from set_DPM you are at
-      if (Servo_Val < servo_min) Servo_Val = servo_min;
-      if (Servo_Val > servo_max) Servo_Val = servo_max;
+    if ( abs(myservo.read() - Servo_Val) <= Servo_movements) { //only change servo value if reached new angle
+      if ( (DPM_avg - set_DPM) > DPM_buffer && first_drop == 0) { //to add forward or reverse bias Uncomment the elseif loop and the DPM condition
+        
+        if (abs( kp * error + ki * errSum + kd * dErr) <= 1 || DPM_avg >= ((2)*set_DPM)) {
+          Servo_Val = Servo_Val - ( kp * error + ki * errSum + kd * dErr); // Set servo change depending on how far away from set_DPM you are at
+        } else {
+          Servo_Val++; //if only small movements needed, one tick at a time
+        }
+        
+        if (debug >= 1) {
+          Serial.print("CHANGE--->");
+          Serial.println(- ( kp * error + ki * errSum + kd * dErr));
+        }
+        if (Servo_Val < servo_min) {Servo_Val = servo_min;}
+        if (Servo_Val > servo_max) {Servo_Val = servo_max;}
 
-      if ( kick > 0) {
-        myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-        delay(15);
-        myservo.write(myservo.read() - kick);
-        Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
-        delay(kick_delay);
-        myservo.write(Servo_Val);
-        Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
+        if (debug >= 1) {
+          Serial.println("Servo_angle_method(CLOSING)");
+        }
+
+        if (Mode == 2) {
+          myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
+          delay(15);
+          if (DPM_Instant >= (2 * set_DPM)) {
+            myservo.write(myservo.read() + (DPM_avg * kick_close));
+            Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
+            delay(kick_close_delay);
+            if (debug >= 1) {
+              Serial.println();
+              Serial.println("kick(CLOSING):");
+              Serial.println(DPM_avg);
+              Serial.println(kick_close);
+              Serial.println(DPM_avg * kick_close);
+              Serial.println();
+            }
+          }
+          myservo.write(Servo_Val);
+          Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
+        }
+      } else if ( (DPM_avg - set_DPM) < -DPM_buffer && first_drop == 0) { // This is to give a Forward or Reverse BIAS (commented out)
+        
+        if (abs( kp * error + ki * errSum + kd * dErr) <= 1 || DPM_avg <= ((0.5)*set_DPM)) {
+          Servo_Val = Servo_Val - open_bias * (kp * error + ki * errSum + kd * dErr); // Set servo change depending on how far away from set_DPM you are at
+        } else {
+          Servo_Val--; //if only small movements needed, one tick at a time
+        }
+        
+        if (debug >= 1) {
+          Serial.print("CHANGE--->");
+          Serial.println(- open_bias * (kp * error + ki * errSum + kd * dErr));
+        }
+        if (Servo_Val < servo_min) {Servo_Val = servo_min;}
+        if (Servo_Val > servo_max) {Servo_Val = servo_max;}
+
+        if (debug >= 1) {
+          Serial.println("Servo_angle_method(OPENING)");
+        }
+
+        if (Mode == 2) {
+          myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
+          delay(15);
+          if (DPM_Instant <= ((0.5)*set_DPM)) {
+            myservo.write(myservo.read() - (DPM_avg * kick_open));
+            Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
+            delay(kick_close_delay);
+            if (debug >= 1) {
+              Serial.println();
+              Serial.println("kick(Opening)");
+              Serial.println(DPM_avg);
+              Serial.println(kick_close);
+              Serial.println(DPM_avg * kick_open);
+              Serial.println();
+            }
+          }
+          myservo.write(Servo_Val);
+          Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
+        }
       }
-
     }
-    else if ( (DPM_avg - set_DPM) < -DPM_buffer && first_drop == 0) { // This is to give a Forward or Reverse BIAS (commented out)
-      Servo_Val = Servo_Val - open_bias * (kp * error + ki * errSum + kd * dErr); // Set servo change depending on how far away from set_DPM you are at
-      if (Servo_Val < servo_min) Servo_Val = servo_min;
-      if (Servo_Val > servo_max) Servo_Val = servo_max;
 
-      if ( kick > 0) {
-        myservo.attach(ServoPIN);  // attaches the servo on pin A0 to the servo object ==================== A0
-        delay(15);
-        myservo.write(myservo.read() + kick);
-        Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
-        delay(kick_delay);
-        myservo.write(Servo_Val);
-        Blynk.virtualWrite(SERVO_ANGLE_VIRTUAL_PIN, myservo.read());
-      }
-
+    if (debug >= 1) {
+      Serial.print("*** NEW servo value:"); Serial.println(Servo_Val);
     }
 
     print_stats();
@@ -751,7 +951,7 @@ void Servo_angle_method() { //(NORMAL & AGRESSIVE MODE) The servo angle is adjus
   }
 
   if (voltage == 0 && state == LOW ) { // end of pulse, now we may expect a new one, DEBOUNCE
-    if (millis() - lastDrop > 50) state = HIGH; // only go back to state high if some time has passed.
+    if ((millis() - lastDrop) > 50) state = HIGH; // only go back to state high if some time has passed.
   }
 
   lastErr = error;
@@ -759,7 +959,7 @@ void Servo_angle_method() { //(NORMAL & AGRESSIVE MODE) The servo angle is adjus
 
 void Speed_to_open_method() { //(FORCED MODE) The speed at which the servo is opened to let out a drop is adjusted after every drop to maintain set_DPM
   //The difference with this method is that it always opens the servo. So there is no possibility to "stall" like the Servo angle method
-  //which waits for a drop then potentially sets the angle to a "bad" angle and can wait indefinitely, until the openup kicks in
+  //which waits for a drop then potentially sets the angle to a "bad" angle and can wait indefinitely, until the openup kick_closes in
   //this should be more acurate but also cause more servo noise and it will constantly be running and possibly closing quickly
   //after each drop (TBD)*/
 
@@ -768,10 +968,32 @@ void Speed_to_open_method() { //(FORCED MODE) The speed at which the servo is op
       Serial.println("Speed_to_open_method()");
     }
 
-    if (Servo_Val >= servo_max) {
+    //this can be easily captured with interrupts, but must do it this way without interrupts
+    if ( isNearDrop == 0 && isInterrupt == 0) { //why did you come drop? premature dropulation ...
       servo_max++;
+      closed_to_stop++;
+      Blynk.virtualWrite(SERVO_MAX_PIN, servo_max);
+      if (closed_to_stop > 180) {
+        closed_to_stop = 180;
+      }
       if (servo_max > 180) {
         servo_max = 180;
+      }
+    } else if (isNearDrop == 1 && isInterrupt == 0) { //successful drop
+      if (record_count == 0) {
+        record_count = count;
+      }
+      if ((count - record_count) >= 10) { //10 succesful closes and re-opens in a row
+        servo_max--;
+        closed_to_stop--;
+        Blynk.virtualWrite(SERVO_MAX_PIN, servo_max);
+        if (closed_to_stop < 0) {
+          closed_to_stop = 0;
+        }
+        if (servo_max < 0) {
+          servo_max = 0;
+        }
+        record_count = 0; //clear recording
       }
     }
 
@@ -888,6 +1110,7 @@ BLYNK_CONNECTED() {
     Blynk.syncVirtual(MODE_DROPDOWN); //sync Mode from last setting on APP
     Blynk.syncVirtual(DPM_SLIDER); //sync setDPM from last setting on APP
     Blynk.syncVirtual(DropBOB_DEBUG); //sync Debug Button from last setting on APP
+    Blynk.syncVirtual(BOTTLE_SELECT_PIN); //sync bottle size from last selection on APP
     isFirstConnect = false;
   }
 }
@@ -899,12 +1122,18 @@ void reconnectBlynk() {
     }
     if (Blynk.connect()) {
       Serial.println("Reconnected");
-      Blynk.syncVirtual(MODE_DROPDOWN); //sync Mode from last setting on APP
-      Blynk.syncVirtual(DPM_SLIDER); //sync setDPM from last setting on APP
-      Blynk.syncVirtual(DropBOB_DEBUG); //sync Debug Button from last setting on APP
     } else {
       Serial.println("Not reconnected");
     }
+  }
+
+  if(tuned == 1 && sync_once_aft_tune < 10){ //do once per timer call for 10 iterations to make sure it takes
+    //also once per interval, syncronyse these:
+    Blynk.syncVirtual(MODE_DROPDOWN); //sync Mode from last setting on APP
+    Blynk.syncVirtual(DPM_SLIDER); //sync setDPM from last setting on APP
+    Blynk.syncVirtual(DropBOB_DEBUG); //sync Debug Button from last setting on APP
+    Blynk.syncVirtual(BOTTLE_SELECT_PIN); //sync bottle size from last selection on APP
+    sync_once_aft_tune++;
   }
 }
 
@@ -952,6 +1181,38 @@ void UpTime() {
       Serial.println("-ms");
     }
   }
+}
+
+void topline_function() { // used to create the topline of the LCD during standard operation
+
+  topLine = ""; //clear
+
+  topLine = eta;
+  if (total_time < 10) {
+    topLine += "0"; // add leading zero to make constant
+  }
+  topLine += total_time - round(float(millis()) / 3600000.0); //estimate the total time left by remouving elapsed
+  topLine += "H ";
+
+  // 7 char used for ETA above
+
+  switch (Mode) {
+    case 1:
+      topLine += mode1;
+      break;
+    case 2:
+      topLine += mode2;
+      break;
+    case 3:
+      topLine += mode3;
+      break;
+    default:
+      topLine += "error!";
+      break;
+  }
+
+  // 6 characters used for showing MODE ... leaving 1 char at the end for future.
+
 }
 
 void setup() {
@@ -1114,7 +1375,7 @@ void setup() {
 
   timer.setInterval(10000L, open_up); // open up the servo every 30 seconds if no drops come ... not a Blynk update
 
-  //reconnectBlynk();
+  reconnectBlynk();
 
   while (!Blynk.connected()) {
     //wait for connection
@@ -1122,12 +1383,12 @@ void setup() {
   }
 
   thLCD.clear(); // Clear the LCD
-  thLCD.print(0, 0, "TuningMode(5min)"); // Print top line
+  thLCD.print(0, 0, "Tuning(~5-10min)"); // Print top line
   thLCD.print(0, 1, "please wait ... "); // Print bottom line
 
   isDONE = 0;
   Blynk.virtualWrite(IS_DONE_VPIN, isDONE);
-  
+
   tune(); //start by tuning the system, No blynk update during tuning mode
 
   //these timers should run only after system is tuned (interferes with fast drop reading)
@@ -1137,9 +1398,9 @@ void setup() {
 
 void loop() {
 
-  if ((millis() - lastDrop) > (0.90 * (60000.0 / set_DPM)) && isNearDrop == 0) {
+  if ((millis() - lastDrop) > ((0.75*set_DPM/DPM_Instant) * (60000.0 / set_DPM)) && isNearDrop == 0) {
     isNearDrop = 1;
-    thLCD.print(15, 1, ".");
+    thLCD.print(11, 1, DropNEAR);
   }
 
   if (debug >= 2) {
@@ -1156,25 +1417,15 @@ void loop() {
 
   if ( (Mode == 1) || (Mode == 2) ) { //Only if Mode = Normal (1) or Agressive (2) do this
     Servo_angle_method();
-    if (Mode == 1) {
-      topLine = "MODE: Normal :) ";
-      UpTime(); //Uptime takes away about 100ms
-    }
-    if (Mode == 2) {
-      topLine = "MODE: AGRESSIVE!";
-      UpTime(); //Uptime takes away about 100ms
-    }
+    topline_function();
+    UpTime(); //Uptime takes away about 100ms
   }
 
   if (Mode == 3) { //Only if Mode = Forced (3) do this
     Speed_to_open_method();
-    if (Mode == 3) {
-      //NOTE: can't show uptime on Forced Mode with intterrupts ... Too much servo interference.
-      if (isInterrupt == 0) {
-        topLine = "MODE: FoRcEd ;] ";
-        UpTime(); //Uptime takes away about 100ms
-      }
-    }
+    //NOTE: can't show uptime on Forced Mode with intterrupts ... Too much servo interference.
+    topline_function();
+    UpTime(); //Uptime takes away about 100ms
   }
 
   if ( (millis() - Servo_adjust) >= Servo_update_Speed) {
@@ -1207,14 +1458,6 @@ void loop() {
         Serial.print(")");
         Serial.print(" going to: ");
         Serial.println(Servo_Val);
-      }
-      else if ( ((myservo.read() - Servo_Val) <= -Servo_movements) || ((myservo.read() - Servo_Val) > Servo_movements) ) {
-        if (debug >= 1) {
-          Serial.print("loop(");
-          Serial.print("Valve settled: ");
-          Serial.print(myservo.read());
-          Serial.println(")");
-        }
       }
     }
   }
@@ -1296,3 +1539,66 @@ void sleep_switch() { //Interupt
   delay(1000);
 }
 
+// printFloat prints out the float 'value' rounded to 'places' places after the decimal point
+void printFloat(float value, int places) {
+  // this is used to cast digits 
+  int digit;
+  float tens = 0.1;
+  int tenscount = 0;
+  int i;
+  float tempfloat = value;
+
+    // make sure we round properly. this could use pow from <math.h>, but doesn't seem worth the import
+  // if this rounding step isn't here, the value  54.321 prints as 54.3209
+
+  // calculate rounding term d:   0.5/pow(10,places)  
+  float d = 0.5;
+  if (value < 0)
+    d *= -1.0;
+  // divide by ten for each decimal place
+  for (i = 0; i < places; i++)
+    d/= 10.0;    
+  // this small addition, combined with truncation will round our values properly 
+  tempfloat +=  d;
+
+  // first get value tens to be the large power of ten less than value
+  // tenscount isn't necessary but it would be useful if you wanted to know after this how many chars the number will take
+
+  if (value < 0)
+    tempfloat *= -1.0;
+  while ((tens * 10.0) <= tempfloat) {
+    tens *= 10.0;
+    tenscount += 1;
+  }
+
+
+  // write out the negative if needed
+  if (value < 0)
+    Serial.print('-');
+
+  if (tenscount == 0)
+    Serial.print(0, DEC);
+
+  for (i=0; i< tenscount; i++) {
+    digit = (int) (tempfloat/tens);
+    Serial.print(digit, DEC);
+    tempfloat = tempfloat - ((float)digit * tens);
+    tens /= 10.0;
+  }
+
+  // if no places after decimal, stop now and return
+  if (places <= 0)
+    return;
+
+  // otherwise, write the point and continue on
+  Serial.print('.');  
+
+  // now write out each decimal place by shifting digits one by one into the ones place and writing the truncated value
+  for (i = 0; i < places; i++) {
+    tempfloat *= 10.0; 
+    digit = (int) tempfloat;
+    Serial.print(digit,DEC);  
+    // once written, subtract off that digit
+    tempfloat = tempfloat - (float) digit; 
+  }
+}
