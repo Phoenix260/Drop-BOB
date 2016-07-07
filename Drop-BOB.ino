@@ -409,7 +409,7 @@ void tune() {
         pause_requests();
         timer.run();
   
-        if (first_tune == 1 && (millis() - servo_min_tune_time) > 500 && tuned == 0) {
+        if (first_tune == 1 && (millis() - servo_min_tune_time) > 5000 && tuned == 0) {
           Servo_Val -= 1; //---------------------opening, every 0.5sec ... fast-ish
           myservo.attach(ServoPIN);
           delay(15);
@@ -504,6 +504,21 @@ void tune() {
         timer.run();
   
         blue_LED_blink_on_off(175);
+
+        if ( ( (millis() - lastDrop) > (5 * (60000.0 / set_DPM) ) ) ){
+          if (is_servo_max_tuned == 0  && (millis() - servo_min_tune_time) > 5000 && tuned == 0) {
+            Servo_Val -= 1;
+            if (Servo_Val < 0) {
+              Servo_Val = 0;
+            }
+      
+            myservo.attach(ServoPIN);
+            delay(15);
+            myservo.write(Servo_Val);
+      
+            servo_min_tune_time = millis();
+          }
+        }
       }
   
       if (kick_close_tuned == 0 && (millis() - servo_min_tune_time) > 500 && tuned == 0) {
@@ -545,6 +560,21 @@ void tune() {
         timer.run();
   
         blue_LED_blink_on_off(300);
+
+        if ( ( (millis() - lastDrop) > (5 * (60000.0 / set_DPM) ) ) ){
+          if (is_servo_max_tuned == 0  && (millis() - servo_min_tune_time) > 5000 && tuned == 0) {
+            Servo_Val -= 1;
+            if (Servo_Val < 0) {
+              Servo_Val = 0;
+            }
+      
+            myservo.attach(ServoPIN);
+            delay(15);
+            myservo.write(Servo_Val);
+      
+            servo_min_tune_time = millis();
+          }
+        }
       }
   
       // DROP DEPENDEDNT
@@ -698,12 +728,12 @@ void tune() {
           retune = 1;
         } 
         if( ((servo_min*3/2) > open_to_drop) || open_to_drop > closed_to_stop){
-          Servo_Val = servo_max;
+          Servo_Val = servo_max +5;
           myservo.attach(ServoPIN);
           delay(15);
           myservo.write(Servo_Val);
           
-          kick_open_tuned = 0;
+          first_tune = 1;
           
           tuned = 0;
           retune = 1;
@@ -768,10 +798,26 @@ void tune() {
       }
       else if (tuning_errors > 0) {
         tuned = 1; // ********************* YAY DONE! ***************************
+        start_avg = 0;
+        index_n = 0;
+        start_avg_avg = 0;
+        index_n_avg = 0;
+        total = 0;
+        total_avg = 0;
+        memset(readings,0,sizeof(readings));
+        memset(readings_avg,0,sizeof(readings_avg));
         Blynk.notify(tunning_error_msg); //MAX 120 char
       }
       else{
         tuned = 1; // ********************* YAY DONE! ***************************
+        start_avg = 0;
+        index_n = 0;
+        start_avg_avg = 0;
+        index_n_avg = 0;
+        total = 0;
+        total_avg = 0;
+        memset(readings,0,sizeof(readings));
+        memset(readings_avg,0,sizeof(readings_avg));
         Blynk.notify("Tuning complete!"); //MAX 120 char
       }
     }
@@ -1071,7 +1117,7 @@ void measure_DPM() {
     DPM = total / numReadings;
   }   // drop the instantaneou DPM and use the running ave after all initial readings taken
   else {
-    DPM = total / (index_n + 1);
+    DPM = total / (index_n);
   }
 
   //======================================================================== 10 reading average
@@ -1089,10 +1135,10 @@ void measure_DPM() {
     DPM_avg = total_avg / numReadings_avg;
   }   // drop the instantaneou DPM and use the running ave after all initial readings taken
   else {
-    DPM_avg = total_avg / (index_n_avg + 1);
+    DPM_avg = total_avg / (index_n_avg);
   }
 
-  if( (1/3)*set_DPM > DPM_avg || DPM_avg > (3)*set_DPM  && tuned == 1){
+  if( (1/3)*set_DPM > DPM_avg || DPM_avg > (3)*set_DPM  && tuned == 1 && count > 250){
     String panic_msg = "Panic! Current Avg DPM = ";
     panic_msg += DPM_avg;
     Blynk.notify(panic_msg); //MAX 120 char
