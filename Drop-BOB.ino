@@ -4,19 +4,14 @@
    Please reference my project blog: http://bobbobblogs.blogspot.ca/ if using this sketch in your work.
    When uploading to ESP8266 with Version 2.2 in Arduino boards use 80MHz and 115200 to prevent board crashes (known issue
    with servo on 160Mhz)
-
    NOTE: IN ORDER TO PROGRAM, YOU NEED TO REMOUVE THE JUMPER. // Possibly // Not Not always required ... actually never
    required. dunno why
-
    Resources: Blynk Arduino Library: https://github.com/blynkkk/blynk-library/releases/tag/v0.3.1
-
    Additional Boards Manager: http://arduino.esp8266.com/stable/package_esp8266com_index.json
    Then install ESP8266 in Additional boards to select the Sparkfun ESP8266 Thing Dev
-
    Development environment specifics:
    Arduino IDE 1.6.9
    SparkFun ESP8266 Thing Dev: https://www.sparkfun.com/products/13711
-
    NOTES:  - Upload from Aurduino only at 80Mhz
            - On the Blynk App make sure all widgets are "PUSH". Setting manual intervals slows down this code. If you are getting many APP disconnects (CHECK)
            - If a Virtual pin does not exist in the APP on your phone, the data will not be logged by BLYNK
@@ -382,7 +377,7 @@ void blue_LED_blink_on_off(int blink_time) {
 }
 
 void tune() {
-  
+
   if (debug >= 1) {
     Serial.println("tune()");
   }
@@ -392,13 +387,13 @@ void tune() {
     tuned = 0; first_tune = 1; is_servo_min_tuned = 0; kick_close_tuned = 0; is_servo_max_tuned = 0; kick_open_tuned = 0;
   }
 
-  while (tuned == 0){
+  while (tuned == 0) {
     ///////////////////////////////////////////////////////////////////////////////////////////
     //here I can determine the "open_to_drop" value by opening the valve until it drops ...
     //depends on valves ... around 80-100 is healthy ... if you start to get to 40-ish question it
     //EXIT after 1st drop ... LOW DPM
     ////////////////////////////////////////////////////////////////////////////////////////////
-  
+
     while (first_tune == 1 && tuned == 0) { //first start, open up servo until 1st drop
       if (debug >= 1) {
         Serial.println("tune(open_to_drop)");
@@ -408,15 +403,15 @@ void tune() {
         drop_no_interupt();
         pause_requests();
         timer.run();
-  
+
         if (first_tune == 1 && (millis() - servo_min_tune_time) > 5000 && tuned == 0) {
           Servo_Val -= 1; //---------------------opening, every 0.5sec ... fast-ish
           myservo.attach(ServoPIN);
           delay(15);
           myservo.write(Servo_Val);
-  
+
           open_to_drop = Servo_Val - 10; //  <===================================== TUNE "OPEN TO DROP" VALUE
-  
+
           if (Servo_Val < servo_min) {
             Servo_Val = servo_min;
             Serial.println("Forgot to Add water? ... or something stuck?");
@@ -426,24 +421,24 @@ void tune() {
           }
           servo_min_tune_time = millis();
         }
-  
+
         blue_LED_blink_on_off(25);
       }
-  
+
       voltage = 5;
       measure_DPM();
       print_stats();
-  
+
       first_tune = 0; // drop has come, no longer the first drop ... exit the while loop
-  
+
     }
-  
+
     ////////////////////////////////////////////////////////////////////////////////////////////
     //here I can really tune the servo to its minimum value (opening) and get the true "servo_min" ...
     //should be much higher than 0 ... around 30 - 50 is healthy
     //EXIT after DPM (20pt) hits MAX_DPM_TO_TUNE = ~30 ... HIGH DPM
     //////////////////////////////////////////////////////////////////////////////////////////////
-  
+
     while (first_tune == 0 && is_servo_min_tuned == 0 && tuned == 0) {
       if (debug >= 1) {
         Serial.println("tune(servo_min)");
@@ -453,46 +448,46 @@ void tune() {
         drop_no_interupt();
         pause_requests();
         timer.run();
-  
+
         if (is_servo_min_tuned == 0 && (millis() - servo_min_tune_time) > 1000 && tuned == 0) {
           Servo_Val -= 1; //---------------------opening, slighly slower to get accurate readings
           if (Servo_Val < 0) {
             Servo_Val = 0; // tuning minimum, let this go to 0 if needed ...
           }
-  
+
           myservo.attach(ServoPIN);
           delay(15);
           myservo.write(Servo_Val);
-  
+
           //deliberately using DPM in stead of DPM_avg (I'm looking for the 3pt avg above max_DPM_to_tune
           if (DPM < max_DPM_to_tune) { //  <===================================== TUNE MIN SERVO VALUE
             servo_min = Servo_Val;
           }
-  
+
           servo_min_tune_time = millis();
         }
         blue_LED_blink_on_off(75);
       }
-  
+
       voltage = 5;
       measure_DPM();
       print_stats();
-  
+
       // ... but let the system keep goin until the 20pt avg (DPM_avg) gets to max_DPM_to_tune
       if (DPM_avg > max_DPM_to_tune && count > 10 && is_servo_min_tuned == 0 && tuned == 0) {
-        max_DPM_to_tune = DPM_avg; //assign the DPM avg that entered (could be more than setting)
+        //max_DPM_to_tune = DPM_avg; //assign the DPM avg that entered (could be more than setting)
         Serial.println(); Serial.print("minimum servo value: "); Serial.println(servo_min); Serial.println();
         is_servo_min_tuned = 1;
       }
     }
-  
+
     //////////////////////////////////////////////////////////////////////////////////////////////
     //here I'm tuning the "close-slack" ... phenomenon that If I close the valve now, DPM will actually increase.
     //This is expected
     //this factor should be around 2x (1.5 - 3x healthy) ... if less, question it ... if much higher, question it
     //EXIT after DPM is back down to MAX_DPM_TO_TUNE = ~30 ... LOW-ish DPM
     //////////////////////////////////////////////////////////////////////////////////////////////
-  
+
     while (is_servo_min_tuned == 1 && kick_close_tuned == 0 && tuned == 0) {
       if (debug >= 1) {
         Serial.println("tune(close-slack)");
@@ -502,39 +497,39 @@ void tune() {
         drop_no_interupt();
         pause_requests();
         timer.run();
-  
+
         blue_LED_blink_on_off(175);
 
-        if ( ( (millis() - lastDrop) > (5 * (60000.0 / set_DPM) ) ) ){
+        if ( ( (millis() - lastDrop) > (5 * (60000.0 / set_DPM) ) ) ) {
           if (is_servo_max_tuned == 0  && (millis() - servo_min_tune_time) > 5000 && tuned == 0) {
             Servo_Val -= 1;
             if (Servo_Val < 0) {
               Servo_Val = 0;
             }
-      
+
             myservo.attach(ServoPIN);
             delay(15);
             myservo.write(Servo_Val);
-      
+
             servo_min_tune_time = millis();
           }
         }
       }
-  
+
       if (kick_close_tuned == 0 && (millis() - servo_min_tune_time) > 500 && tuned == 0) {
         Servo_Val += 1; //---------------------closing - and fast too
         myservo.attach(ServoPIN);
         delay(15);
         myservo.write(Servo_Val);
-  
+
         if (Servo_Val < 0) Servo_Val = 0; // tuning minimum, let this go to 0 if needed ...
         servo_min_tune_time = millis();
       }
-  
+
       voltage = 5;
       measure_DPM();
       print_stats();
-  
+
       // ... looks like were back where we started ... how much "kick" was that?
       if (DPM < max_DPM_to_tune && kick_close_tuned == 0 && tuned == 0) {
         kick_close = (Servo_Val - servo_min) / max_DPM_to_tune; //  <===================================== TUNE factor of % of DPM to kick_close
@@ -542,13 +537,13 @@ void tune() {
         kick_close_tuned = 1;
       }
     }
-  
+
     //////////////////////////////////////////////////////////////////////////////////////////////////
     //here I'm tuning the maximum servo "servo_max" value (closing) until drops get to set_DPM, then estimate the full close
     //here, your servo value should be much less than 180, (120-150 is healthy)
     //EXIT after DPM just reaches set_DPM (LOW DPM VALUE)
     /////////////////////////////////////////////////////////////////////////////////////////////////
-  
+
     while (kick_close_tuned == 1 && is_servo_max_tuned == 0 && tuned == 0) {
       if (debug >= 1) {
         Serial.println("tune(servo_max)");
@@ -558,43 +553,43 @@ void tune() {
         drop_no_interupt();
         pause_requests();
         timer.run();
-  
+
         blue_LED_blink_on_off(300);
 
-        if ( ( (millis() - lastDrop) > (5 * (60000.0 / set_DPM) ) ) ){
+        if ( ( (millis() - lastDrop) > (5 * (60000.0 / set_DPM) ) ) ) {
           if (is_servo_max_tuned == 0  && (millis() - servo_min_tune_time) > 5000 && tuned == 0) {
             Servo_Val -= 1;
             if (Servo_Val < 0) {
               Servo_Val = 0;
             }
-      
+
             myservo.attach(ServoPIN);
             delay(15);
             myservo.write(Servo_Val);
-      
+
             servo_min_tune_time = millis();
           }
         }
       }
-  
+
       // DROP DEPENDEDNT
       if (is_servo_max_tuned == 0  && (millis() - servo_min_tune_time) > 1000 && tuned == 0) {
         Servo_Val += 1; //---------------------still closing, but slower
         if (Servo_Val > 180) {
           Servo_Val = 180; // tuning maximun, let this go to 180 if needed ...
         }
-  
+
         myservo.attach(ServoPIN);
         delay(15);
         myservo.write(Servo_Val);
-  
+
         servo_min_tune_time = millis();
       }
-  
+
       voltage = 5;
       measure_DPM();
       print_stats();
-  
+
       // "close to stop" & "Max value", very similar, tuned together (estimted from the close up to DPM value)
       // these "estimates" need to be reviewed with other set_DPM values ... I'm mostly using 6DPM, this will change
       if (DPM <= set_DPM && is_servo_max_tuned == 0 && tuned == 0) {
@@ -611,13 +606,13 @@ void tune() {
         is_servo_max_tuned = 1;
       }
     }
-  
+
     //////////////////////////////////////////////////////////////////////////////////////////////////
     //here I'm tuning the "open-slack" ... a direction reversal will usually cause an oposite reaction
     //so we need to find out how much
     //this factor should be around 2x, usually less than close-slack, (1 - 2.5x is healthy)
     //////////////////////////////////////////////////////////////////////////////////////////////////
-  
+
     while (is_servo_max_tuned == 1 && kick_open_tuned == 0 && tuned == 0) {
       if (debug >= 1) {
         Serial.println("tune(open-slack)");
@@ -627,23 +622,23 @@ void tune() {
         drop_no_interupt();
         pause_requests();
         timer.run();
-  
+
         if (kick_open_tuned == 0 && (millis() - servo_min_tune_time) > 3000 && tuned == 0) {
           Servo_Val -= 1; //---------------------opening
           myservo.attach(ServoPIN);
           delay(15);
           myservo.write(Servo_Val);
-  
+
           if (Servo_Val < 0) Servo_Val = 0; // tuning minimum, let this go to 0 if needed ...
           servo_min_tune_time = millis();
         }
         blue_LED_blink_on_off(500);
       }
-  
+
       voltage = 5;
       measure_DPM();
       print_stats();
-  
+
       //if opening the valve causes much less DPM ... give it some JUICE!
       if (abs(DPM_Instant - set_DPM) > (2 * set_DPM / 3)) { //  <===============
         Servo_Val -= 5;
@@ -653,7 +648,7 @@ void tune() {
         Servo_Val -= 3;
         if (Servo_Val < 0) Servo_Val = 0; // tuning minimum, let this go to 0 if needed ...
       }
-  
+
       // ... and back to set_DPM again, how much "kick open" did that take?
       if ( (DPM > set_DPM) && (kick_open_tuned == 0) && (tuned == 0) ) {
         kick_open = ((closed_to_stop - 2) - Servo_Val) / set_DPM; //this is the factor of % of DPM to kick_close
@@ -661,12 +656,12 @@ void tune() {
         kick_open_tuned = 1;
       }
     }
-  
+
     if (kick_open_tuned == 1) { //done only if the last step is done ...
-  
+
       Blynk.virtualWrite(SERVO_MAX_PIN, servo_max);
       Blynk.virtualWrite(SERVO_MIN_PIN, servo_min);
-  
+
       Serial.println();
       Serial.println("Tuning complete Report: ");
       Serial.print("kick_open: "); Serial.print(kick_open); Serial.println(" xDPM");
@@ -679,89 +674,91 @@ void tune() {
       Serial.print("closed_to_stop: "); Serial.println(closed_to_stop);
       Serial.println();
 
-      if (retune == 0){
-        if( 1 > kick_open || kick_open > 5){
+      if (retune == 0) {
+        if ( 1 > kick_open || kick_open > 5) {
           Servo_Val = servo_min;
           myservo.attach(ServoPIN);
           delay(15);
           myservo.write(Servo_Val);
-  
+
           is_servo_max_tuned = 0;
           kick_open_tuned = 0;
-          
+
           tuned = 0;
           retune = 1;
         }
-        if( 1 > kick_close || kick_close > 5){
+        if ( 1 > kick_close || kick_close > 5) {
           Servo_Val = servo_max;
           myservo.attach(ServoPIN);
           delay(15);
           myservo.write(Servo_Val);
-  
+
           first_tune = 1;
           is_servo_min_tuned = 0;
           kick_close_tuned = 0;
-          
+
           tuned = 0;
           retune = 1;
         }
-        if( 10 > servo_min || servo_min > 100){
+        if ( 10 > servo_min || servo_min > 100) {
           Servo_Val = servo_max;
           myservo.attach(ServoPIN);
           delay(15);
           myservo.write(Servo_Val);
-          
+
           is_servo_min_tuned = 0;
-          
+
           tuned = 0;
           retune = 1;
-        } 
-        if( 90 > servo_max || servo_max > 170){
-          Servo_Val = servo_min;
-          myservo.attach(ServoPIN);
-          delay(15);
-          myservo.write(Servo_Val);
-          
+        }
+        if ( 90 > servo_max || servo_max > 170) {
+          if ( first_tune == 0) {
+            Servo_Val = servo_min;
+            myservo.attach(ServoPIN);
+            delay(15);
+            myservo.write(Servo_Val);
+          }
+
           is_servo_max_tuned = 0;
-          
+
           tuned = 0;
           retune = 1;
-        } 
-        if( ((servo_min*3/2) > open_to_drop) || open_to_drop > closed_to_stop){
-          Servo_Val = servo_max +5;
+        }
+        if ( ((servo_min * 3 / 2) > open_to_drop) || open_to_drop > closed_to_stop) {
+          Servo_Val = servo_max + 5;
           myservo.attach(ServoPIN);
           delay(15);
           myservo.write(Servo_Val);
-          
+
           first_tune = 1;
-          
+
           tuned = 0;
           retune = 1;
-        } 
+        }
       }
-      else if (retune == 1){
-        if( 1 > kick_open || kick_open > 5){
+      else if (retune == 1) {
+        if ( 1 > kick_open || kick_open > 5) {
           kick_open_err = 1;
         }
-        if( 1 > kick_close || kick_close > 5){
+        if ( 1 > kick_close || kick_close > 5) {
           kick_close_err = 1;
         }
-        if( 10 > servo_min || servo_min > 100){
+        if ( 10 > servo_min || servo_min > 100) {
           servo_min_err = 1;
         }
-        if( 90 > servo_max || servo_max > 170){
+        if ( 90 > servo_max || servo_max > 170) {
           servo_max_err = 1;
         }
-        if( ((servo_min*3/2) > open_to_drop) || open_to_drop > closed_to_stop){
+        if ( ((servo_min * 3 / 2) > open_to_drop) || open_to_drop > closed_to_stop) {
           open_to_drop_err = 1;
         }
-        
+
         tuning_errors = kick_open_err + kick_close_err + servo_min_err + servo_max_err + open_to_drop_err;
 
-        if(tuning_errors){
+        if (tuning_errors) {
           tunning_error_msg = tuning_errors;
           tunning_error_msg += " tunning errors -> ";
-          
+
           if (kick_open_err == 1) {
             tunning_error_msg += "kick_open ERROR: ";
             tunning_error_msg += kick_open;
@@ -787,13 +784,13 @@ void tune() {
             tunning_error_msg += open_to_drop;
             tunning_error_msg += " ";
           }
-        } 
+        }
         else {
           retune = 0; //no more erros, good to go
         }
       }
-       
-      if (retune == 1 && tuning_errors == 0){
+
+      if (retune == 1 && tuning_errors == 0) {
         Blynk.notify("ERROR! re-tuning. Valve may need maintence"); //MAX 120 char
       }
       else if (tuning_errors > 0) {
@@ -804,11 +801,11 @@ void tune() {
         index_n_avg = 0;
         total = 0;
         total_avg = 0;
-        memset(readings,0,sizeof(readings));
-        memset(readings_avg,0,sizeof(readings_avg));
+        memset(readings, 0, sizeof(readings));
+        memset(readings_avg, 0, sizeof(readings_avg));
         Blynk.notify(tunning_error_msg); //MAX 120 char
       }
-      else{
+      else {
         tuned = 1; // ********************* YAY DONE! ***************************
         start_avg = 0;
         index_n = 0;
@@ -816,8 +813,8 @@ void tune() {
         index_n_avg = 0;
         total = 0;
         total_avg = 0;
-        memset(readings,0,sizeof(readings));
-        memset(readings_avg,0,sizeof(readings_avg));
+        memset(readings, 0, sizeof(readings));
+        memset(readings_avg, 0, sizeof(readings_avg));
         Blynk.notify("Tuning complete!"); //MAX 120 char
       }
     }
@@ -1138,7 +1135,7 @@ void measure_DPM() {
     DPM_avg = total_avg / (index_n_avg);
   }
 
-  if( (1/3)*set_DPM > DPM_avg || DPM_avg > (3)*set_DPM  && tuned == 1 && count > 250){
+  if ( (1 / 3)*set_DPM > DPM_avg || DPM_avg > (3)*set_DPM  && tuned == 1 && count > 250) {
     String panic_msg = "Panic! Current Avg DPM = ";
     panic_msg += DPM_avg;
     Blynk.notify(panic_msg); //MAX 120 char
@@ -1704,10 +1701,10 @@ void setup() {
 
   reconnectBlynk();
 
-  while (!Blynk.connected()) {
+  /*while (!Blynk.connected()) {
     //wait for connection
     Blynk.run();
-  }
+    }*/
 
   thLCD.clear(); // Clear the LCD
   topLine = "Tuning(~5-10min)";
@@ -1716,6 +1713,8 @@ void setup() {
 
   isDONE = 0;
   Blynk.virtualWrite(IS_DONE_VPIN, isDONE);
+
+  Serial.println("tuning ... should take 5-10min. please wait");
 
   tune(); //start by tuning the system, No blynk update during tuning mode
 
