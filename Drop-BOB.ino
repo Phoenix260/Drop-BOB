@@ -400,7 +400,6 @@ void tune() {
 
     myservo.attach(ServoPIN);
     delay(15);
-    myservo.write(Servo_Val);
 
     for (int run_tune = 0; run_tune < tuning_drops; run_tune++) {
 
