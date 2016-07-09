@@ -1,6 +1,6 @@
 /***********************************************************************************************
    DROP-BOB(tm) Software Version 1.00.0-b2 - finally out of alpha state!!!!!!!!!
-   
+
    This sketch is created for use of a cold drip coffeemaker with a THING DEV from Sparkfun using the ESP8266 wifi chip.
    Copyright: Bobby Lumia, may be used and modified for personal use only. No resale.
    Please reference my project blog: http://bobbobblogs.blogspot.ca/ if using this sketch in your work.
@@ -136,8 +136,7 @@ float A = 0;
 float B = 0;
 long uptime = 0;
 int update_Sync = 0;
-float Low_LED = millis();
-float High_LED = millis();
+unsigned long LED_current_time = millis();
 float Servo_adjust = millis(); //servo adjustment time keeper
 double time_now = 0;
 bool isFirstConnect = true;
@@ -145,6 +144,7 @@ int first_tune = 1;
 bool shouldSaveConfig = false;
 float seconds, minutes, hours, days;
 unsigned long interrupt_time = millis();
+unsigned long pausetime = millis();
 int tuned = 0;
 int is_servo_min_tuned = 0;
 int is_servo_max_tuned = 0;
@@ -233,10 +233,63 @@ String ErraticNote = ".Err"; //characters indictation the LCD is stoped to focus
 String botLine = ""; //empty strings used to compose the LCD - size 17 since you need space for the "\0" null char
 String topLine = ""; //empty strings used to compose the LCD - size 17 since you need space for the "\0" null char
 
+// MORSE CODE ========================================================
+
+int count_Morse = 1;
+int word_index = 0;
+int morse_index = 0;
+unsigned long LED_time_unit_CONST = 0;
+
+const char * morsecode[] = {
+  "-----",  // 0
+  ".----",  // 1
+  "..---",  // 2
+  "...--",  // 3
+  "....-",  // 4
+  ".....",  // 5
+  "-....",  // 6
+  "--...",  // 7
+  "---..",  // 8
+  "----.",  // 9
+  "---...", // :
+  "-.-.-.", // ;
+  "",       // < (there's no morse for this symbol)
+  "-...-",  // =
+  "",       // > (there's no morse for this symbol)
+  "..--..", // ?
+  ".--._.", // @
+  ".-",     // A
+  "-...",   // B
+  "-.-.",   // C
+  "-..",    // D
+  ".",      // E
+  "..-.",   // F
+  "--.",    // G
+  "....",   // H
+  "..",     // I
+  ".---",   // J
+  "-.-",    // K
+  ".-..",   // L
+  "--",     // M
+  "-.",     // N
+  "---",    // O
+  ".--.",   // P
+  "--.-",   // Q
+  ".-.",    // R
+  "...",    // S
+  "-",      // T
+  "..-",    // U
+  "...-",   // V
+  ".--",    // W
+  "-..-",   // X
+  "-.--",   // Y
+  "--.."    // Z
+};
+
 /********************************
- * Main functions
- */
- 
+   Main functions
+*/
+
 void setup() {
   Serial.begin(19200);
   delay(10);
@@ -370,7 +423,7 @@ void setup() {
 
   if (!digitalRead(SleepPin)) {
     while (!digitalRead(SleepPin)) { // let the setting be reset only if I let go of the switch ...
-      blue_LED_blink_on_off(50);
+      blue_LED_blink_on_off(100, "SOS"); //Reset (SOS) -->  | | | | | | |.| |.| |.| | | |-|-|-| |-|-|-| |-|-|-| | | |.| |.| |.|
     }
     wifiManager.resetSettings();  //clear settings
     SPIFFS.format();              //clear File System
@@ -448,7 +501,7 @@ void tune() { //part of Main functions because it is called in Setup
         pause_requests();
         timer.run();
 
-        if (first_tune == 1 && (millis() - servo_min_tune_time) > 5000 && tuned == 0) {
+        if (first_tune == 1 && (millis() - servo_min_tune_time) > 1000 && tuned == 0) {
           Servo_Val -= 1; //---------------------opening, every 0.5sec ... fast-ish
           myservo.attach(ServoPIN);
           delay(15);
@@ -466,7 +519,7 @@ void tune() { //part of Main functions because it is called in Setup
           servo_min_tune_time = millis();
         }
 
-        blue_LED_blink_on_off(25);
+        blue_LED_blink_on_off(200, "E");
       }
 
       voltage = 5;
@@ -474,7 +527,6 @@ void tune() { //part of Main functions because it is called in Setup
       print_stats();
 
       first_tune = 0; // drop has come, no longer the first drop ... exit the while loop
-
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////
@@ -510,7 +562,7 @@ void tune() { //part of Main functions because it is called in Setup
 
           servo_min_tune_time = millis();
         }
-        blue_LED_blink_on_off(75);
+        blue_LED_blink_on_off(400, "E");
       }
 
       voltage = 5;
@@ -542,7 +594,7 @@ void tune() { //part of Main functions because it is called in Setup
         pause_requests();
         timer.run();
 
-        blue_LED_blink_on_off(175);
+        blue_LED_blink_on_off(600, "E");
 
         if ( ( (millis() - lastDrop) > (5 * (60000.0 / set_DPM) ) ) ) {
           if (is_servo_max_tuned == 0  && (millis() - servo_min_tune_time) > 5000 && tuned == 0) {
@@ -598,7 +650,7 @@ void tune() { //part of Main functions because it is called in Setup
         pause_requests();
         timer.run();
 
-        blue_LED_blink_on_off(300);
+        blue_LED_blink_on_off(800, "E");
 
         if ( ( (millis() - lastDrop) > (5 * (60000.0 / set_DPM) ) ) ) {
           if (is_servo_max_tuned == 0  && (millis() - servo_min_tune_time) > 5000 && tuned == 0) {
@@ -676,7 +728,7 @@ void tune() { //part of Main functions because it is called in Setup
           if (Servo_Val < 0) Servo_Val = 0; // tuning minimum, let this go to 0 if needed ...
           servo_min_tune_time = millis();
         }
-        blue_LED_blink_on_off(500);
+        blue_LED_blink_on_off(1000, "E");
       }
 
       voltage = 5;
@@ -859,7 +911,7 @@ void tune() { //part of Main functions because it is called in Setup
         total_avg = 0;
         memset(readings, 0, sizeof(readings));
         memset(readings_avg, 0, sizeof(readings_avg));
-        Blynk.notify("Tuning complete!"); //MAX 120 char
+        Blynk.notify("Tuning completed successfully!"); //MAX 120 char
       }
     }
   }
@@ -880,7 +932,8 @@ void loop() {
   Blynk.run();
   timer.run(); // Initiates SimpleTimer
 
-  digitalWrite(LED_PIN, HIGH); // for some odd reason ... LED PIN to "HIGH" means "off"
+  //digitalWrite(LED_PIN, HIGH); // for some odd reason ... LED PIN to "HIGH" means "off"
+  blue_LED_blink_on_off(200, "O"); //ON -->  | | | | | | |-|-|-| |-|-|-| |-|-|-|
 
   drop_no_interupt();
 
@@ -962,10 +1015,10 @@ void loop() {
 }
 
 /********************************
- * Timer baked functions to help Blynk keep updated
- * Called on a timer
- */
- 
+   Timer baked functions to help Blynk keep updated
+   Called on a timer
+*/
+
 void open_up() {
 
   // is it taking too long? Don't use on Tuning mode or while in forced mode
@@ -1032,13 +1085,13 @@ void reconnectBlynk() {
 }
 
 /********************************
- * PID - GOVERNORS
- * Called in program each loop
- */
+   PID - GOVERNORS
+   Called in program each loop
+*/
 
-//(STANDARD MODE & PASSIVE MODE {same as "OLD" AGRESSIVE & NORMAL MODE) The servo angle is adjusted after every 
+//(STANDARD MODE & PASSIVE MODE {same as "OLD" AGRESSIVE & NORMAL MODE) The servo angle is adjusted after every
 // drop to maintain set_DPM
-void Servo_angle_method() { 
+void Servo_angle_method() {
   // This method sets the servo position according to the latest drop DPM (more open or more closed
   // This method is very lagging as it uses old data, including the last 10 point average to set the future servo position
 
@@ -1164,9 +1217,9 @@ void Servo_angle_method() {
   lastErr = error;
 }
 
-//(FORCED MODE) The speed at which the servo is opened to let out a drop is adjusted after every drop to maintain 
+//(FORCED MODE) The speed at which the servo is opened to let out a drop is adjusted after every drop to maintain
 // set_DPM
-void Speed_to_open_method() { 
+void Speed_to_open_method() {
   //The difference with this method is that it always opens the servo. So there is no possibility to "stall" like the Servo angle method
   //which waits for a drop then potentially sets the angle to a "bad" angle and can wait indefinitely, until the openup kick_closes in
   //this should be more acurate but also cause more servo noise and it will constantly be running and possibly closing quickly
@@ -1307,23 +1360,26 @@ void Speed_to_open_method() {
 }
 
 /********************************
- * routine functions
- * Called in program each loop
- */
- 
+   routine functions
+   Called in program each loop
+*/
+
 void pause_requests() {
+
   while (pause == 1) {
     if (debug >= 1) {
       Serial.println("pause_requests()");
     }
 
-    //if (Blynk.connected()) {
-    Blynk.run();
-    //}
+    if ((millis() - pausetime) > 30000) {
+      thLCD.clear(); // Clear the LCD
+      thLCD.print(0, 0, "Paused ..."); // Print top line
+      thLCD.print(0, 1, "Valve Closed"); // Print bottom line
+      pausetime = millis();
+    }
 
-    thLCD.clear(); // Clear the LCD
-    thLCD.print(0, 0, "Paused ..."); // Print top line
-    thLCD.print(0, 1, "Valve Closed"); // Print bottom line
+    Blynk.run();
+    blue_LED_blink_on_off(200, "P"); //Pause -->  | | | | | | |.| |-|-|-| |-|-|-| |.|
 
     if (myservo.read() != servo_max) {      //Close the valve when paused (True pause)
       myservo.attach(ServoPIN);
@@ -1341,17 +1397,77 @@ void pause_requests() {
   }
 }
 
-void blue_LED_blink_on_off(int blink_time) {
-  if (millis() - High_LED > blink_time) { // add LED indicator for tuning
-    digitalWrite(LED_PIN, LOW);
-    Low_LED = millis();
-    High_LED = INFINITY;
+// (in millis (100-1000), in digital(100-1023),in text(sos,hello,word,mama,etc))
+void blue_LED_blink_on_off(int LED_blink_time_unit, String MORSE_CODE_string) {
+  LED_blink_time_unit = constrain(LED_blink_time_unit, 100, 1000);
+
+  char charac = toUpperCase(MORSE_CODE_string.charAt(word_index));
+
+  if (charac != '\0') {
+    if ((charac >= '0') && (charac <= 'Z') && (charac != '<') && (charac != '>')) {
+      String morse_word = morsecode[charac - '0'];
+
+      if (morse_word[morse_index] != '\0') {
+
+        if (morse_word[morse_index] == '-' && digitalRead(LED_PIN) == HIGH && (millis() - LED_current_time >= LED_time_unit_CONST)) {
+          LED_time_unit_CONST = LED_blink_time_unit * 3;
+          digitalWrite(LED_PIN, LOW); //turn ON LED
+          LED_current_time = millis();
+          count_Morse = 1;
+        }
+
+        if (morse_word[morse_index] == '.' && digitalRead(LED_PIN) == HIGH && (millis() - LED_current_time >= LED_time_unit_CONST)) {
+          LED_time_unit_CONST = LED_blink_time_unit;
+          digitalWrite(LED_PIN, LOW); //turn ON LED
+          LED_current_time = millis();
+          count_Morse = 1;
+        }
+
+        if (digitalRead(LED_PIN) == LOW && millis() - LED_current_time >= LED_time_unit_CONST) { //===== intergap
+          LED_time_unit_CONST = LED_blink_time_unit;
+          digitalWrite(LED_PIN, HIGH);
+          morse_index++;
+          LED_current_time = millis();
+          count_Morse = 1;
+        }
+
+        if (digitalRead(LED_PIN) == HIGH && millis() - LED_current_time >= LED_blink_time_unit * count_Morse && count_Morse < LED_time_unit_CONST / LED_blink_time_unit) { //===== intergap
+          count_Morse++;
+        }
+
+        if (digitalRead(LED_PIN) == LOW && millis() - LED_current_time >= LED_blink_time_unit * count_Morse && count_Morse < LED_time_unit_CONST / LED_blink_time_unit) { //===== intergap
+          count_Morse++;
+        }
+
+      } else if (morse_word[morse_index] == '\0') {
+        LED_time_unit_CONST = LED_blink_time_unit * 3; //====================================== space between letters
+        morse_index = 0;
+        word_index++;
+        LED_current_time = millis();
+      }
+
+    } else if (charac == ' ') {
+      LED_time_unit_CONST = LED_blink_time_unit * 7; //======================================== space between words
+      morse_index = 0;
+      word_index++;
+      LED_current_time = millis();
+
+    } else {
+      Serial.println("MORSE: not a character ");
+      word_index++;
+    }
+
+  } else if (charac == '\0') {
+    word_index = 0;
+    morse_index = 0;
+    LED_time_unit_CONST = LED_blink_time_unit * 7; //======================================== space between words
+    LED_current_time = millis();
+
+  } else {
+    Serial.println("MORSE: 404:Failed ");
+    word_index++;
   }
-  if (millis() - Low_LED > blink_time) { // add LED indicator for tuning
-    digitalWrite(LED_PIN, HIGH);
-    High_LED = millis();
-    Low_LED = INFINITY;
-  }
+
 }
 
 void saveConfigCallback () {
@@ -1363,9 +1479,9 @@ void saveConfigCallback () {
 }
 
 /********************************
- * Debuging & reporting functions
- * Called in program each loop
- */
+   Debuging & reporting functions
+   Called in program each loop
+*/
 
 void print_stats() {
   if (debug >= 1) {
@@ -1740,14 +1856,14 @@ void printFloat(float value, int places) {
 }
 
 /********************************
- * Drop Sensing functions
- * Called in program each loop
- * Or called by Interrupt (But interrupts cause more trouble than they are worth
- * Calling them too often can cause Blynk & Arduino to Crash Uncontrollably
- * So the interrupt is "off" for now
- */
+   Drop Sensing functions
+   Called in program each loop
+   Or called by Interrupt (But interrupts cause more trouble than they are worth
+   Calling them too often can cause Blynk & Arduino to Crash Uncontrollably
+   So the interrupt is "off" for now
+*/
 
-void drop_no_interupt() { 
+void drop_no_interupt() {
   if (isInterrupt == 0) {
     raw = analogRead(photo_interuptor_PIN); // read the drop sensor
     if (raw == 0 && (millis() - last_interrupt_drop) > 100) {
@@ -1776,9 +1892,9 @@ void drop_interrupt() {
 }
 
 /********************************
- * Hardware functions
- * Interrupt called (can be triggered anywhere in the code)
- */
+   Hardware functions
+   Interrupt called (can be triggered anywhere in the code)
+*/
 
 void sleep_switch() { //Interupt
   if (debug >= 1) {
@@ -1801,8 +1917,8 @@ void sleep_switch() { //Interupt
 }
 
 /**** BLYNK FUNCTIONS ***********************************************************************
- *  virtual pins in App call BLYNK_WRITE
- *  BLYNK_CONNECTED is called when Blynk Connects
+    virtual pins in App call BLYNK_WRITE
+    BLYNK_CONNECTED is called when Blynk Connects
  *******************************************************************************************/
 
 BLYNK_CONNECTED() {
