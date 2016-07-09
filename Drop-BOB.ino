@@ -1397,7 +1397,7 @@ void pause_requests() {
   }
 }
 
-// (in millis (100-1000), in digital(100-1023),in text(sos,hello,word,mama,etc))
+// (in millis (100-1000), in text(sos,hello world,mama,etc ... anything basically))
 void blue_LED_blink_on_off(int LED_blink_time_unit, String MORSE_CODE_string) {
   LED_blink_time_unit = constrain(LED_blink_time_unit, 100, 1000);
 
